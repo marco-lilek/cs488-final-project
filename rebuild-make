@@ -1,0 +1,5 @@
+#!/bin/bash
+
+premake5 gmake
+premake5 export-compile-commands
+cp -f compile_commands/debug.json compile_commands.json

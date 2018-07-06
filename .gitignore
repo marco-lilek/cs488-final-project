@@ -1,0 +1,4 @@
+build/
+Makefile
+compile_commands.json
+compile_commands/
