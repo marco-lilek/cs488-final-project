@@ -60,9 +60,15 @@ protected:
 	GLuint m_vao_meshData;
 	GLuint m_vbo_vertexPositions;
 	GLuint m_vbo_vertexNormals;
+	GLuint m_vbo_vertexUVs;
 	GLint m_positionAttribLocation;
 	GLint m_normalAttribLocation;
+	GLint m_uvAttribLocation;
 	ShaderProgram m_shader;
+
+  // TODO temporary texture
+  void loadTextures();
+  GLuint m_texture;
 
 	// BatchInfoMap is an associative container that maps a unique MeshId to a BatchInfo
 	// object. Each BatchInfo object contains an index offset and the number of indices

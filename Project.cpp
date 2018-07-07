@@ -7,6 +7,7 @@ using namespace std;
 #include "cs488-framework/MathUtils.hpp"
 #include "GeometryNode.hpp"
 #include "JointNode.hpp"
+#include "stb_image.h"
 
 #include <imgui/imgui.h>
 
@@ -26,9 +27,11 @@ Project::Project(const std::string & luaSceneFile)
 	: m_luaSceneFile(luaSceneFile),
 	  m_positionAttribLocation(0),
 	  m_normalAttribLocation(0),
+	  m_uvAttribLocation(0),
 	  m_vao_meshData(0),
 	  m_vbo_vertexPositions(0),
-	  m_vbo_vertexNormals(0)
+	  m_vbo_vertexNormals(0),
+	  m_vbo_vertexUVs(0)
 {
 
 }
@@ -81,11 +84,38 @@ void Project::init()
 
 	initLightSources();
 
+  loadTextures();
 
 	// Exiting the current scope calls delete automatically on meshConsolidator freeing
 	// all vertex data resources.  This is fine since we already copied this data to
 	// VBOs on the GPU.  We have no use for storing vertex data on the CPU side beyond
 	// this point.
+}
+
+void Project::loadTextures() {
+  // TODO: for now just assume a single texture, later will have to do texture per object
+  // probably tru mesh consolidator
+  
+  glGenTextures(1, &m_texture);
+  glBindTexture(GL_TEXTURE_2D, m_texture);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  int width, height, nrChannels;
+  unsigned char *data = stbi_load("Assets/cube-export-uv-layout-col.jpg", &width, &height, &nrChannels, 0);
+  if (data)
+  {
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+      glGenerateMipmap(GL_TEXTURE_2D);
+  }
+  else
+  {
+      std::cout << "Failed to load texture" << std::endl;
+  }
+  stbi_image_free(data);
 }
 
 //----------------------------------------------------------------------------------------
@@ -124,10 +154,18 @@ void Project::enableVertexShaderInputSlots()
 		// Enable the vertex shader attribute location for "position" when rendering.
 		m_positionAttribLocation = m_shader.getAttribLocation("position");
 		glEnableVertexAttribArray(m_positionAttribLocation);
+		
+    CHECK_GL_ERRORS;
 
 		// Enable the vertex shader attribute location for "normal" when rendering.
 		m_normalAttribLocation = m_shader.getAttribLocation("normal");
 		glEnableVertexAttribArray(m_normalAttribLocation);
+
+		CHECK_GL_ERRORS;
+		
+    // Enable the vertex shader attribute location for "uv" when rendering.
+    m_uvAttribLocation = m_shader.getAttribLocation("vertexUV");
+    glEnableVertexAttribArray(m_uvAttribLocation);
 
 		CHECK_GL_ERRORS;
 	}
@@ -166,6 +204,18 @@ void Project::uploadVertexDataToVbos (
 		CHECK_GL_ERRORS;
 	}
 
+  // Generate VBO to store all vertex uv data
+  {
+    glGenBuffers(1, &m_vbo_vertexUVs);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexUVs);
+
+    glBufferData(GL_ARRAY_BUFFER, meshConsolidator.getNumVertexUVBytes(),
+        meshConsolidator.getVertexUVDataPtr(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    CHECK_GL_ERRORS;
+  }
 }
 
 //----------------------------------------------------------------------------------------
@@ -178,18 +228,16 @@ void Project::mapVboDataToVertexShaderInputLocations()
 	// "position" vertex attribute location for any bound vertex shader program.
 	glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexPositions);
 	glVertexAttribPointer(m_positionAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-
-	// Tell GL how to map data from the vertex buffer "m_vbo_vertexNormals" into the
+	
+  // Tell GL how to map data from the vertex buffer "m_vbo_vertexNormals" into the
 	// "normal" vertex attribute location for any bound vertex shader program.
 	glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexNormals);
 	glVertexAttribPointer(m_normalAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
-	//-- Unbind target, and restore default values:
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glBindVertexArray(0);
-
-	CHECK_GL_ERRORS;
-
+  // Tell GL how to map data from the vertex buffer "m_vbo_vertexUVs" into the
+	// "uv" vertex attribute location for any bound vertex shader program.
+	glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexUVs);
+	glVertexAttribPointer(m_uvAttribLocation, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
 
 	//-- Unbind target, and restore default values:
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
