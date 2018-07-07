@@ -40,7 +40,7 @@ Project::Project(const std::string & luaSceneFile)
 // Destructor
 Project::~Project()
 {
-
+  delete[] m_textures;
 }
 
 //----------------------------------------------------------------------------------------
@@ -65,8 +65,7 @@ void Project::init()
 	// class.
 	unique_ptr<MeshConsolidator> meshConsolidator (new MeshConsolidator{
 			getAssetFilePath("cube.obj"),
-			getAssetFilePath("sphere.obj"),
-			getAssetFilePath("suzanne.obj")
+			getAssetFilePath("sphere.obj")
 	});
 
 
@@ -93,29 +92,42 @@ void Project::init()
 }
 
 void Project::loadTextures() {
-  // TODO: for now just assume a single texture, later will have to do texture per object
-  // probably tru mesh consolidator
+  // TODO: load obj with blank textures
+  for (BatchInfoMap::iterator it = m_batchInfoMap.begin(); it != m_batchInfoMap.end(); it++) {
+    assert(it->second.texture.size() != 0);
+    m_textureNameIdMap[it->second.texture] = 0;
+  }
   
-  glGenTextures(1, &m_texture);
-  glBindTexture(GL_TEXTURE_2D, m_texture);
+  // Number of unique texture ptrs
+  m_textures = new GLuint[m_textureNameIdMap.size()];
+  glGenTextures(m_textureNameIdMap.size(), m_textures);
+  
+  unsigned int texturesIt = 0;
+  for (map<string, GLuint>::iterator it = m_textureNameIdMap.begin(); it != m_textureNameIdMap.end(); it++, texturesIt++) {
+    const std::string &textureName = it->first;
+    m_textureNameIdMap[textureName] = m_textures[texturesIt];
+    glBindTexture(GL_TEXTURE_2D, m_textures[texturesIt]);
 
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-  int width, height, nrChannels;
-  unsigned char *data = stbi_load("Assets/container.jpg", &width, &height, &nrChannels, 0);
-  if (data)
-  {
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-      glGenerateMipmap(GL_TEXTURE_2D);
+    int width, height, nrChannels;
+    std::string textureFilename = "Assets/"+textureName;
+    DEBUGM(cerr << "loading texture " << textureFilename << endl);
+    unsigned char *data = stbi_load(textureFilename.c_str(), &width, &height, &nrChannels, 0);
+    if (data) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+    } else {
+        std::cout << "Failed to load texture" << std::endl;
+    }
+
+    CHECK_GL_ERRORS; // we might run out of space
+    stbi_image_free(data);
   }
-  else
-  {
-      std::cout << "Failed to load texture" << std::endl;
-  }
-  stbi_image_free(data);
+
 }
 
 //----------------------------------------------------------------------------------------
@@ -426,6 +438,7 @@ void Project::renderSceneGraphRecursive(const mat4 &parentTransform, const Scene
 
   // Get the BatchInfo corresponding to the GeometryNode's unique MeshId.
   BatchInfo batchInfo = m_batchInfoMap[geometryNode->meshId];
+  glBindTexture(GL_TEXTURE_2D, m_textureNameIdMap[batchInfo.texture]);
 
   //-- Now render the mesh:
   m_shader.enable();
