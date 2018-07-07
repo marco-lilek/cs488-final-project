@@ -1,3 +1,4 @@
+#include "debug.hpp"
 #include "Project.hpp"
 #include "scene_lua.hpp"
 using namespace std;
@@ -130,7 +131,6 @@ void Project::enableVertexShaderInputSlots()
 
 		CHECK_GL_ERRORS;
 	}
-
 
 	// Restore defaults
 	glBindVertexArray(0);
@@ -301,7 +301,8 @@ void Project::guiLogic()
 // Update mesh specific shader uniforms:
 static void updateShaderUniforms(
 		const ShaderProgram & shader,
-		const GeometryNode & node,
+    const GeometryNode & node,
+		const glm::mat4 & nodeTrans,
 		const glm::mat4 & viewMatrix
 ) {
 
@@ -309,7 +310,7 @@ static void updateShaderUniforms(
 	{
 		//-- Set ModelView matrix:
 		GLint location = shader.getUniformLocation("ModelView");
-		mat4 modelView = viewMatrix * node.trans;
+		mat4 modelView = viewMatrix * nodeTrans;
 		glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(modelView));
 		CHECK_GL_ERRORS;
 
@@ -357,41 +358,33 @@ void Project::renderSceneGraph(const SceneNode & root) {
 	// Bind the VAO once here, and reuse for all GeometryNode rendering below.
 	glBindVertexArray(m_vao_meshData);
 
-	// This is emphatically *not* how you should be drawing the scene graph in
-	// your final implementation.  This is a non-hierarchical demonstration
-	// in which we assume that there is a list of GeometryNodes living directly
-	// underneath the root node, and that we can draw them in a loop.  It's
-	// just enough to demonstrate how to get geometry and materials out of
-	// a GeometryNode and onto the screen.
-
-	// You'll want to turn this into recursive code that walks over the tree.
-	// You can do that by putting a method in SceneNode, overridden in its
-	// subclasses, that renders the subtree rooted at every node.  Or you
-	// could put a set of mutually recursive functions in this class, which
-	// walk down the tree from nodes of different types.
-
-	for (const SceneNode * node : root.children) {
-
-		if (node->m_nodeType != NodeType::GeometryNode)
-			continue;
-
-		const GeometryNode * geometryNode = static_cast<const GeometryNode *>(node);
-
-		updateShaderUniforms(m_shader, *geometryNode, m_view);
-
-
-		// Get the BatchInfo corresponding to the GeometryNode's unique MeshId.
-		BatchInfo batchInfo = m_batchInfoMap[geometryNode->meshId];
-
-		//-- Now render the mesh:
-		m_shader.enable();
-		glDrawArrays(GL_TRIANGLES, batchInfo.startIndex, batchInfo.numIndices);
-		m_shader.disable();
-	}
+  renderSceneGraphRecursive(mat4(), root);
 
 	glBindVertexArray(0);
 	CHECK_GL_ERRORS;
 }
+
+void Project::renderSceneGraphRecursive(const mat4 &parentTransform, const SceneNode &root) {
+  glm::mat4 myTrans = parentTransform * root.get_transform();
+  for (const SceneNode * node : root.children) {
+    renderSceneGraphRecursive(myTrans, *node);
+  }
+
+  if (root.m_nodeType != NodeType::GeometryNode) return;
+
+  const GeometryNode * geometryNode = static_cast<const GeometryNode *>(&root);
+
+  updateShaderUniforms(m_shader, *geometryNode, myTrans, m_view);
+
+  // Get the BatchInfo corresponding to the GeometryNode's unique MeshId.
+  BatchInfo batchInfo = m_batchInfoMap[geometryNode->meshId];
+
+  //-- Now render the mesh:
+  m_shader.enable();
+  glDrawArrays(GL_TRIANGLES, batchInfo.startIndex, batchInfo.numIndices);
+  m_shader.disable();
+}
+
 
 //----------------------------------------------------------------------------------------
 /*
@@ -491,6 +484,10 @@ bool Project::keyInputEvent (
 			show_gui = !show_gui;
 			eventHandled = true;
 		}
+    if (key == GLFW_KEY_Q) {
+			glfwSetWindowShouldClose(m_window, GL_TRUE);
+      eventHandled = true;
+    }
 	}
 	// Fill in with event handling code...
 

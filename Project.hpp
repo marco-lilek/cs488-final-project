@@ -48,6 +48,7 @@ protected:
 	void initPerspectiveMatrix();
 	void uploadCommonSceneUniforms();
 	void renderSceneGraph(const SceneNode &node);
+
 	void renderArcCircle();
 
 	glm::mat4 m_perpsective;
@@ -71,4 +72,6 @@ protected:
 	std::string m_luaSceneFile;
 
 	std::shared_ptr<SceneNode> m_rootNode;
+
+  void renderSceneGraphRecursive(const glm::mat4 &parentTransform, const SceneNode &root);
 };
