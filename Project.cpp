@@ -7,7 +7,9 @@ using namespace std;
 #include "cs488-framework/MathUtils.hpp"
 #include "GeometryNode.hpp"
 #include "JointNode.hpp"
+#include "PerlinNoise.hpp"
 #include "stb_image.h"
+
 
 #include <imgui/imgui.h>
 
@@ -20,6 +22,10 @@ using namespace glm;
 static bool show_gui = true;
 
 const size_t CIRCLE_PTS = 48;
+const size_t SHADOW_DIM = 1024;
+const size_t SHADOW_WIDTH = SHADOW_DIM, SHADOW_HEIGHT = SHADOW_DIM;
+
+
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -53,8 +59,11 @@ void Project::init()
 	glClearColor(0.35, 0.35, 0.35, 1.0);
 
 	createShaderProgram();
+  createDepthMapShaderProgram();
 
 	glGenVertexArrays(1, &m_vao_meshData);
+	glGenVertexArrays(1, &m_vao_depthData);
+
 	enableVertexShaderInputSlots();
 
 	processLuaSceneFile(m_luaSceneFile);
@@ -77,18 +86,57 @@ void Project::init()
 
 	mapVboDataToVertexShaderInputLocations();
 
+  initDepthMapFBO();
+
 	initPerspectiveMatrix();
 
-	initViewMatrix();
-
 	initLightSources();
+  initViewMatrix();
+
 
   loadTextures();
+  loadNoiseTexture();
 
 	// Exiting the current scope calls delete automatically on meshConsolidator freeing
 	// all vertex data resources.  This is fine since we already copied this data to
 	// VBOs on the GPU.  We have no use for storing vertex data on the CPU side beyond
 	// this point.
+}
+
+void Project::initDepthMapFBO() {
+  glGenFramebuffers(1, &m_fbo_depthMap);
+
+  glGenTextures(1, &m_depthMap);
+  glBindTexture(GL_TEXTURE_2D, m_depthMap);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, 
+             SHADOW_WIDTH, SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER); 
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);  
+  float borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+  glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_fbo_depthMap);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthMap, 0);
+  glDrawBuffer(GL_NONE);
+  glReadBuffer(GL_NONE);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindTexture(GL_TEXTURE_2D,0);
+}
+
+void Project::loadNoiseTexture() {
+  glGenTextures(1, &m_noiseTexture);
+  
+  glBindTexture(GL_TEXTURE_2D, m_noiseTexture);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  PerlinNoise noise;
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, noise.NOISE_DIM, noise.NOISE_DIM, 0, GL_RGB, GL_UNSIGNED_BYTE, noise.getNoise().get());
+  CHECK_GL_ERRORS;
 }
 
 void Project::loadTextures() {
@@ -99,9 +147,33 @@ void Project::loadTextures() {
   }
   
   // Number of unique texture ptrs
-  m_textures = new GLuint[m_textureNameIdMap.size()];
-  glGenTextures(m_textureNameIdMap.size(), m_textures);
-  
+  int numTextures = 1;//m_textureNameIdMap.size();
+  DEBUGM(cerr << "numTextures " << numTextures << endl);
+  m_textures = new GLuint[numTextures];
+  glGenTextures(numTextures, m_textures);
+
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  int width, height, nrChannels;
+  std::string textureFilename = "Assets/1160-normal.jpg"; //getAssetFilePath(textureName.c_str());
+  DEBUGM(cerr << "loading texture " << textureFilename << endl);
+  unsigned char *data = stbi_load(textureFilename.c_str(), &width, &height, &nrChannels, 0);
+  if (data) {
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+      //glGenerateMipmap(GL_TEXTURE_2D);
+  } else {
+      std::cout << "Failed to load texture" << std::endl;
+  }
+  m_textureNameIdMap[textureFilename] = m_textures[0];
+
+  CHECK_GL_ERRORS; // we might run out of space
+  glBindTexture(GL_TEXTURE_2D,0);
+  /*
   unsigned int texturesIt = 0;
   for (map<string, GLuint>::iterator it = m_textureNameIdMap.begin(); it != m_textureNameIdMap.end(); it++, texturesIt++) {
     const std::string &textureName = it->first;
@@ -114,12 +186,12 @@ void Project::loadTextures() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     int width, height, nrChannels;
-    std::string textureFilename = "Assets/"+textureName;
+    std::string textureFilename = "Assets/container.jpg"; //getAssetFilePath(textureName.c_str());
     DEBUGM(cerr << "loading texture " << textureFilename << endl);
     unsigned char *data = stbi_load(textureFilename.c_str(), &width, &height, &nrChannels, 0);
     if (data) {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-        glGenerateMipmap(GL_TEXTURE_2D);
+        //glGenerateMipmap(GL_TEXTURE_2D);
     } else {
         std::cout << "Failed to load texture" << std::endl;
     }
@@ -127,7 +199,7 @@ void Project::loadTextures() {
     CHECK_GL_ERRORS; // we might run out of space
     stbi_image_free(data);
   }
-
+*/
 }
 
 //----------------------------------------------------------------------------------------
@@ -153,9 +225,19 @@ void Project::createShaderProgram()
 	m_shader.attachVertexShader( getAssetFilePath("VertexShader.vs").c_str() );
 	m_shader.attachFragmentShader( getAssetFilePath("FragmentShader.fs").c_str() );
 	m_shader.link();
-
+  m_shaderID = m_shader.getProgramObject();
 }
 
+//----------------------------------------------------------------------------------------
+void Project::createDepthMapShaderProgram()
+{
+	m_depthMapShader.generateProgramObject();
+	m_depthMapShader.attachVertexShader( getAssetFilePath("DepthMapVertexShader.vs").c_str() );
+	m_depthMapShader.attachFragmentShader( getAssetFilePath("DepthMapFragmentShader.fs").c_str() );
+	m_depthMapShader.link();
+  m_depthMapShaderID = m_depthMapShader.getProgramObject();
+
+}
 //----------------------------------------------------------------------------------------
 void Project::enableVertexShaderInputSlots()
 {
@@ -181,6 +263,16 @@ void Project::enableVertexShaderInputSlots()
 
 		CHECK_GL_ERRORS;
 	}
+
+  //input slots for depth map shader
+  {
+    glBindVertexArray(m_vao_depthData);
+		// Enable the vertex shader attribute location for "position" when rendering.
+		m_depthPositionAttribLocation = m_depthMapShader.getAttribLocation("position");
+		glEnableVertexAttribArray(m_depthPositionAttribLocation);
+		
+    CHECK_GL_ERRORS;
+  }
 
 	// Restore defaults
 	glBindVertexArray(0);
@@ -233,29 +325,43 @@ void Project::uploadVertexDataToVbos (
 //----------------------------------------------------------------------------------------
 void Project::mapVboDataToVertexShaderInputLocations()
 {
-	// Bind VAO in order to record the data mapping.
-	glBindVertexArray(m_vao_meshData);
+  {
+    // Bind VAO in order to record the data mapping.
+    glBindVertexArray(m_vao_meshData);
 
-	// Tell GL how to map data from the vertex buffer "m_vbo_vertexPositions" into the
-	// "position" vertex attribute location for any bound vertex shader program.
-	glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexPositions);
-	glVertexAttribPointer(m_positionAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-	
-  // Tell GL how to map data from the vertex buffer "m_vbo_vertexNormals" into the
-	// "normal" vertex attribute location for any bound vertex shader program.
-	glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexNormals);
-	glVertexAttribPointer(m_normalAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    // Tell GL how to map data from the vertex buffer "m_vbo_vertexPositions" into the
+    // "position" vertex attribute location for any bound vertex shader program.
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexPositions);
+    glVertexAttribPointer(m_positionAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    
+    // Tell GL how to map data from the vertex buffer "m_vbo_vertexNormals" into the
+    // "normal" vertex attribute location for any bound vertex shader program.
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexNormals);
+    glVertexAttribPointer(m_normalAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
-  // Tell GL how to map data from the vertex buffer "m_vbo_vertexUVs" into the
-	// "uv" vertex attribute location for any bound vertex shader program.
-	glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexUVs);
-	glVertexAttribPointer(m_uvAttribLocation, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+    // Tell GL how to map data from the vertex buffer "m_vbo_vertexUVs" into the
+    // "uv" vertex attribute location for any bound vertex shader program.
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexUVs);
+    glVertexAttribPointer(m_uvAttribLocation, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
 
-	//-- Unbind target, and restore default values:
-	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	glBindVertexArray(0);
+    //-- Unbind target, and restore default values:
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
 
-	CHECK_GL_ERRORS;
+    CHECK_GL_ERRORS;
+  }
+
+  {
+    glBindVertexArray(m_vao_depthData);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexPositions);
+    glVertexAttribPointer(m_depthPositionAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    
+    //-- Unbind target, and restore default values:
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    CHECK_GL_ERRORS;
+  }
 }
 
 //----------------------------------------------------------------------------------------
@@ -265,18 +371,24 @@ void Project::initPerspectiveMatrix()
 	m_perpsective = glm::perspective(degreesToRadians(60.0f), aspect, 0.1f, 100.0f);
 }
 
-
 //----------------------------------------------------------------------------------------
 void Project::initViewMatrix() {
-	m_view = glm::lookAt(vec3(0.0f, 0.0f, 0.0f), vec3(0.0f, 0.0f, -1.0f),
+	m_view = glm::lookAt(vec3(0.0f, 5.0f, -10.0f), vec3(0.0f, 0.0f, 0.0f),
 			vec3(0.0f, 1.0f, 0.0f));
 }
 
 //----------------------------------------------------------------------------------------
 void Project::initLightSources() {
 	// World-space position
-	m_light.position = vec3(-2.0f, 5.0f, 0.5f);
+	m_light.position = vec3(-2,5,-5);
 	m_light.rgbIntensity = vec3(0.8f); // White light
+
+  // glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, 0.0f, 50.0f)
+	float aspect = ((float)m_windowWidth) / m_windowHeight;
+  m_lightSpaceMatrix =glm::perspective<float>(glm::radians(45.0f), 1.0f, 2.0f, 50.0f) *
+    glm::lookAt(m_light.position, 
+                glm::vec3( 0.0f, 0.0f,  0.0f), 
+                glm::vec3( 0.0f, 1.0f,  0.0f));
 }
 
 //----------------------------------------------------------------------------------------
@@ -301,12 +413,29 @@ void Project::uploadCommonSceneUniforms() {
 		//-- Set background light ambient intensity
 		{
 			location = m_shader.getUniformLocation("ambientIntensity");
-			vec3 ambientIntensity(0.05f);
+			vec3 ambientIntensity(0.1f);
 			glUniform3fv(location, 1, value_ptr(ambientIntensity));
 			CHECK_GL_ERRORS;
 		}
+
+    //-- 
+		{
+			location = m_shader.getUniformLocation("LightSpaceMatrix");
+      glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(m_lightSpaceMatrix));
+			CHECK_GL_ERRORS;
+		}
+
+
 	}
 	m_shader.disable();
+
+  m_depthMapShader.enable();
+  {
+    GLint location = m_depthMapShader.getUniformLocation("LightSpaceMatrix");
+    glUniformMatrix4fv(location,1,GL_FALSE, value_ptr(m_lightSpaceMatrix));
+    CHECK_GL_ERRORS;
+  }
+  m_depthMapShader.disable();
 }
 
 //----------------------------------------------------------------------------------------
@@ -359,42 +488,47 @@ void Project::guiLogic()
 
 //----------------------------------------------------------------------------------------
 // Update mesh specific shader uniforms:
-static void updateShaderUniforms(
+void Project::updateShaderUniforms(
 		const ShaderProgram & shader,
-    const GeometryNode & node,
+    const GeometryNode *node,
 		const glm::mat4 & nodeTrans,
 		const glm::mat4 & viewMatrix
 ) {
 
 	shader.enable();
-	{
+	if (shader.getProgramObject() == m_shaderID) {
 		//-- Set ModelView matrix:
-		GLint location = shader.getUniformLocation("ModelView");
-		mat4 modelView = viewMatrix * nodeTrans;
-		glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(modelView));
-		CHECK_GL_ERRORS;
+		GLint location = shader.getUniformLocation("View");
+    glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(viewMatrix));
+    CHECK_GL_ERRORS;
+
+		location = shader.getUniformLocation("Model");
+    glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(nodeTrans));
+    CHECK_GL_ERRORS;
 
 		//-- Set NormMatrix:
 		location = shader.getUniformLocation("NormalMatrix");
-		mat3 normalMatrix = glm::transpose(glm::inverse(mat3(modelView)));
-		glUniformMatrix3fv(location, 1, GL_FALSE, value_ptr(normalMatrix));
-		CHECK_GL_ERRORS;
-
+    mat3 normalMatrix = glm::transpose(glm::inverse(mat3(viewMatrix * nodeTrans)));
+    glUniformMatrix3fv(location, 1, GL_FALSE, value_ptr(normalMatrix));
+    CHECK_GL_ERRORS;
 
 		//-- Set Material values:
 		location = shader.getUniformLocation("material.kd");
-		vec3 kd = node.material.kd;
-		glUniform3fv(location, 1, value_ptr(kd));
-		CHECK_GL_ERRORS;
-		location = shader.getUniformLocation("material.ks");
-		vec3 ks = node.material.ks;
-		glUniform3fv(location, 1, value_ptr(ks));
-		CHECK_GL_ERRORS;
-		location = shader.getUniformLocation("material.shininess");
-		glUniform1f(location, node.material.shininess);
-		CHECK_GL_ERRORS;
-
-	}
+    vec3 kd = node->material.kd;
+    glUniform3fv(location, 1, value_ptr(kd));
+    CHECK_GL_ERRORS;
+    location = shader.getUniformLocation("material.ks");
+    vec3 ks = node->material.ks;
+    glUniform3fv(location, 1, value_ptr(ks));
+    CHECK_GL_ERRORS;
+    location = shader.getUniformLocation("material.shininess");
+    glUniform1f(location, node->material.shininess);
+    CHECK_GL_ERRORS;
+	} else if (shader.getProgramObject() == m_depthMapShaderID) {
+		GLint location = shader.getUniformLocation("Model");
+    glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(nodeTrans));
+    CHECK_GL_ERRORS;
+  }
 	shader.disable();
 
 }
@@ -404,46 +538,70 @@ static void updateShaderUniforms(
  * Called once per frame, after guiLogic().
  */
 void Project::draw() {
+  // Render depth map
+  glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_fbo_depthMap);
+  glEnable(GL_DEPTH_TEST);
+  glClear(GL_DEPTH_BUFFER_BIT);
+  glCullFace(GL_FRONT);
+  renderSceneGraph(m_depthMapShader, *m_rootNode);
+  glCullFace(GL_BACK);
+  glDisable(GL_DEPTH_TEST);
+  glBindFramebuffer(GL_FRAMEBUFFER, 0); 
 
-	glEnable( GL_DEPTH_TEST );
-	renderSceneGraph(*m_rootNode);
+  //// Render the actual scene
+  glViewport(0, 0, m_windowWidth, m_windowHeight);
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+  m_shader.enable();
+  GLuint location = m_shader.getUniformLocation("textureSampler");
+  glUniform1i(location, 0);
+  location = m_shader.getUniformLocation("shadowMap");
+  glUniform1i(location, 1);
+  m_shader.disable();
 
-	glDisable( GL_DEPTH_TEST );
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_depthMap);
+  glEnable( GL_DEPTH_TEST );
+  renderSceneGraph(m_shader, *m_rootNode);
+  glDisable( GL_DEPTH_TEST );
+
+  CHECK_GL_ERRORS;
 }
 
 //----------------------------------------------------------------------------------------
-void Project::renderSceneGraph(const SceneNode & root) {
+void Project::renderSceneGraph(const ShaderProgram &shader, const SceneNode & root) {
 
 	// Bind the VAO once here, and reuse for all GeometryNode rendering below.
 	glBindVertexArray(m_vao_meshData);
 
-  renderSceneGraphRecursive(mat4(), root);
+  renderSceneGraphRecursive(shader, mat4(), root);
 
 	glBindVertexArray(0);
 	CHECK_GL_ERRORS;
 }
 
-void Project::renderSceneGraphRecursive(const mat4 &parentTransform, const SceneNode &root) {
+void Project::renderSceneGraphRecursive(const ShaderProgram &shader, const mat4 &parentTransform, const SceneNode &root) {
   glm::mat4 myTrans = parentTransform * root.get_transform();
   for (const SceneNode * node : root.children) {
-    renderSceneGraphRecursive(myTrans, *node);
+    renderSceneGraphRecursive(shader, myTrans, *node);
   }
 
   if (root.m_nodeType != NodeType::GeometryNode) return;
 
   const GeometryNode * geometryNode = static_cast<const GeometryNode *>(&root);
 
-  updateShaderUniforms(m_shader, *geometryNode, myTrans, m_view);
+  updateShaderUniforms(shader, geometryNode, myTrans, m_view);
 
   // Get the BatchInfo corresponding to the GeometryNode's unique MeshId.
   BatchInfo batchInfo = m_batchInfoMap[geometryNode->meshId];
-  glBindTexture(GL_TEXTURE_2D, m_textureNameIdMap[batchInfo.texture]);
 
   //-- Now render the mesh:
-  m_shader.enable();
+  shader.enable();
   glDrawArrays(GL_TRIANGLES, batchInfo.startIndex, batchInfo.numIndices);
-  m_shader.disable();
+  shader.disable();
 }
 
 

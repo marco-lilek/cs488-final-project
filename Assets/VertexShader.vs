@@ -11,7 +11,9 @@ struct LightSource {
 };
 uniform LightSource light;
 
-uniform mat4 ModelView;
+uniform mat4 LightSpaceMatrix;
+uniform mat4 Model;
+uniform mat4 View;
 uniform mat4 Perspective;
 
 // Remember, this is transpose(inverse(ModelView)).  Normals should be
@@ -21,21 +23,24 @@ uniform mat3 NormalMatrix;
 out VsOutFsIn {
 	vec3 position_ES; // Eye-space position
 	vec3 normal_ES;   // Eye-space normal
+  vec3 lightSource_ES;
+  vec2 texCoords;
+  vec4 fragPosLightSpace;
 	LightSource light;
 } vs_out;
-
-out vec2 UV;
 
 void main() {
 	vec4 pos4 = vec4(position, 1.0);
 
 	//-- Convert position and normal to Eye-Space:
-	vs_out.position_ES = (ModelView * pos4).xyz;
+	vs_out.position_ES = (View * Model * pos4).xyz;
 	vs_out.normal_ES = normalize(NormalMatrix * normal);
 
 	vs_out.light = light;
+  vs_out.lightSource_ES = mat3(View) * light.position;
+  vs_out.texCoords = vertexUV;
+  vs_out.fragPosLightSpace = LightSpaceMatrix * Model * pos4;
 
-	gl_Position = Perspective * ModelView * vec4(position, 1.0);
+	gl_Position = Perspective * View * Model * pos4;
 
-  UV = vertexUV;
 }

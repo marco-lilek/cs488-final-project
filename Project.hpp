@@ -17,6 +17,7 @@ struct LightSource {
 };
 
 
+class GeometryNode;
 class Project : public CS488Window {
 public:
 	Project(const std::string & luaSceneFile);
@@ -48,8 +49,14 @@ protected:
 
 	void initPerspectiveMatrix();
 	void uploadCommonSceneUniforms();
-	void renderSceneGraph(const SceneNode &node);
-
+void updateShaderUniforms(
+		const ShaderProgram & shader,
+    const GeometryNode *node,
+		const glm::mat4 & nodeTrans,
+		const glm::mat4 & viewMatrix
+);
+	void renderSceneGraph(const ShaderProgram &shader,const SceneNode &node);
+  void renderSceneGraphRecursive(const ShaderProgram &shader, const glm::mat4 &parentTransform, const SceneNode &root);
 	void renderArcCircle();
 
 	glm::mat4 m_perpsective;
@@ -70,6 +77,22 @@ protected:
   std::map<std::string, GLuint> m_textureNameIdMap;
   void loadTextures();
   GLuint *m_textures;
+
+  GLuint m_fbo_depthMap;
+  GLuint m_vao_depthData;
+  GLuint m_depthPositionAttribLocation;
+  GLuint m_depthMap;
+  void initDepthMapFBO();
+  void createDepthMapShaderProgram();
+  ShaderProgram m_depthMapShader;
+
+  GLuint m_shaderID;
+  GLuint m_depthMapShaderID;
+
+  GLuint m_noiseTexture;
+  void loadNoiseTexture();
+
+  glm::mat4 m_lightSpaceMatrix;
 
 	// BatchInfoMap is an associative container that maps a unique MeshId to a BatchInfo
 	// object. Each BatchInfo object contains an index offset and the number of indices
