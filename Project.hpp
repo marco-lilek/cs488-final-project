@@ -61,6 +61,7 @@ void updateShaderUniforms(
 
 	glm::mat4 m_perpsective;
 	glm::mat4 m_view;
+  glm::vec3 m_viewPos;
 
 	LightSource m_light;
 
@@ -93,6 +94,11 @@ void updateShaderUniforms(
   void loadNoiseTexture();
 
   glm::mat4 m_lightSpaceMatrix;
+
+  GLuint m_vbo_vertexTangents;
+  GLuint m_tangentAttribLocation;
+  GLuint m_vbo_vertexBitangents;
+  GLuint m_bitangentAttribLocation;
 
 	// BatchInfoMap is an associative container that maps a unique MeshId to a BatchInfo
 	// object. Each BatchInfo object contains an index offset and the number of indices

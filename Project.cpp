@@ -34,12 +34,16 @@ Project::Project(const std::string & luaSceneFile)
 	  m_positionAttribLocation(0),
 	  m_normalAttribLocation(0),
 	  m_uvAttribLocation(0),
+	  m_tangentAttribLocation(0),
+	  m_bitangentAttribLocation(0),
 	  m_vao_meshData(0),
 	  m_vbo_vertexPositions(0),
 	  m_vbo_vertexNormals(0),
-	  m_vbo_vertexUVs(0)
+	  m_vbo_vertexUVs(0),
+	  m_vbo_vertexTangents(0),
+	  m_vbo_vertexBitangents(0)
 {
-
+  m_viewPos = vec3(0,5,-10);
 }
 
 //----------------------------------------------------------------------------------------
@@ -262,6 +266,18 @@ void Project::enableVertexShaderInputSlots()
     glEnableVertexAttribArray(m_uvAttribLocation);
 
 		CHECK_GL_ERRORS;
+
+    // Enable the vertex shader attribute location for "uv" when rendering.
+    m_tangentAttribLocation = m_shader.getAttribLocation("aTangent");
+    glEnableVertexAttribArray(m_tangentAttribLocation);
+
+		CHECK_GL_ERRORS;
+
+    // Enable the vertex shader attribute location for "uv" when rendering.
+    m_bitangentAttribLocation = m_shader.getAttribLocation("aBitangent");
+    glEnableVertexAttribArray(m_bitangentAttribLocation);
+
+		CHECK_GL_ERRORS;
 	}
 
   //input slots for depth map shader
@@ -320,6 +336,30 @@ void Project::uploadVertexDataToVbos (
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     CHECK_GL_ERRORS;
   }
+
+  {
+    glGenBuffers(1, &m_vbo_vertexTangents);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexTangents);
+
+    glBufferData(GL_ARRAY_BUFFER, meshConsolidator.getNumVertexTangentBytes(),
+        meshConsolidator.getVertexTangentDataPtr(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    CHECK_GL_ERRORS;
+  }
+
+  {
+    glGenBuffers(1, &m_vbo_vertexBitangents);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexBitangents);
+
+    glBufferData(GL_ARRAY_BUFFER, meshConsolidator.getNumVertexBitangentBytes(),
+        meshConsolidator.getVertexBitangentDataPtr(), GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    CHECK_GL_ERRORS;
+  }
 }
 
 //----------------------------------------------------------------------------------------
@@ -343,6 +383,12 @@ void Project::mapVboDataToVertexShaderInputLocations()
     // "uv" vertex attribute location for any bound vertex shader program.
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexUVs);
     glVertexAttribPointer(m_uvAttribLocation, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexTangents);
+    glVertexAttribPointer(m_tangentAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexBitangents);
+    glVertexAttribPointer(m_bitangentAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
     //-- Unbind target, and restore default values:
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -373,7 +419,7 @@ void Project::initPerspectiveMatrix()
 
 //----------------------------------------------------------------------------------------
 void Project::initViewMatrix() {
-	m_view = glm::lookAt(vec3(0.0f, 5.0f, -10.0f), vec3(0.0f, 0.0f, 0.0f),
+	m_view = glm::lookAt(m_viewPos, vec3(0.0f, 0.0f, 0.0f),
 			vec3(0.0f, 1.0f, 0.0f));
 }
 
@@ -400,6 +446,10 @@ void Project::uploadCommonSceneUniforms() {
 		glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(m_perpsective));
 		CHECK_GL_ERRORS;
 
+    {
+      location = m_shader.getUniformLocation("viewPos");
+			glUniform3fv(location, 1, value_ptr(m_viewPos));
+    }
 
 		//-- Set LightSource uniform for the scene:
 		{

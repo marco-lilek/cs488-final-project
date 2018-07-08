@@ -1,6 +1,7 @@
 #version 330
 
 uniform sampler2D textureSampler;
+uniform sampler2D normalMap;
 uniform sampler2D shadowMap;
 
 struct LightSource {
@@ -15,6 +16,10 @@ in VsOutFsIn {
   vec2 texCoords;
   vec4 fragPosLightSpace;
 	LightSource light;
+
+  vec3 TangentLightPos;
+  vec3 TangentViewPos;
+  vec3 TangentFragPos;
 } fs_in;
 
 
