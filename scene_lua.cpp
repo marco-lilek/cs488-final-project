@@ -44,6 +44,8 @@
 #include "JointNode.hpp"
 #include "GeometryNode.hpp"
 
+#include "glm/glm.hpp"
+
 // Uncomment the following line to enable debugging messages
 //#define GRLUA_ENABLE_DEBUG
 
@@ -155,6 +157,8 @@ int gr_mesh_cmd(lua_State* L)
 	return 1;
 }
 
+#include <iostream>
+using namespace std;
 
 // Create a material
 extern "C"
@@ -175,6 +179,7 @@ int gr_material_cmd(lua_State* L)
 
   luaL_checktype(L, 3, LUA_TNUMBER);
 
+
   double kd[3], ks[3];
   for (int i = 1; i <= 3; i++) {
     lua_rawgeti(L, 1, i);
@@ -191,6 +196,14 @@ int gr_material_cmd(lua_State* L)
 		data->material->ks[i] = ks[i];
 	}
 	data->material->shininess = shininess;
+
+  if (lua_gettop(L) == 5) {
+    luaL_checktype(L, 4, LUA_TNUMBER);
+    double transparency = luaL_checknumber(L,4);
+    data->material->transparency = glm::clamp(transparency,0.0,1.0);
+  } else {
+    data->material->transparency = 1;
+  }
 
   luaL_newmetatable(L, "gr.material");
   lua_setmetatable(L, -2);
@@ -239,6 +252,7 @@ int gr_node_set_material_cmd(lua_State* L)
 	self->material.kd = material->kd;
 	self->material.ks = material->ks;
 	self->material.shininess = material->shininess;
+	self->material.transparency = material->transparency;
 
   return 0;
 }

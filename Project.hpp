@@ -97,8 +97,8 @@ void updateShaderUniforms(
 
   GLuint m_vbo_vertexTangents;
   GLuint m_tangentAttribLocation;
-  GLuint m_vbo_vertexBitangents;
-  GLuint m_bitangentAttribLocation;
+
+  GLuint m_normalMap;
 
 	// BatchInfoMap is an associative container that maps a unique MeshId to a BatchInfo
 	// object. Each BatchInfo object contains an index offset and the number of indices
@@ -108,6 +108,5 @@ void updateShaderUniforms(
 	std::string m_luaSceneFile;
 
 	std::shared_ptr<SceneNode> m_rootNode;
-
-  void renderSceneGraphRecursive(const glm::mat4 &parentTransform, const SceneNode &root);
+  void collectTransparentNodesRecursive(const SceneNode &root, const glm::mat4 &parentTransform, std::vector<std::pair<const GeometryNode *, glm::mat4> > &transparentNodes);
 };

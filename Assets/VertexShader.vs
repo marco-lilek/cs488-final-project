@@ -5,7 +5,6 @@ in vec3 position;
 in vec3 normal;
 in vec2 vertexUV;
 in vec3 aTangent;
-in vec3 aBitangent;
 
 struct LightSource {
     vec3 position;
@@ -24,9 +23,6 @@ uniform mat4 Perspective;
 uniform mat3 NormalMatrix;
 
 out VsOutFsIn {
-	vec3 position_ES; // Eye-space position
-	vec3 normal_ES;   // Eye-space normal
-  vec3 lightSource_ES;
   vec2 texCoords;
   vec4 fragPosLightSpace;
 	LightSource light;
@@ -34,32 +30,29 @@ out VsOutFsIn {
   vec3 TangentLightPos;
   vec3 TangentViewPos;
   vec3 TangentFragPos;
+
 } vs_out;
 
 void main() {
 	vec4 pos4 = vec4(position, 1.0);
 
-	//-- Convert position and normal to Eye-Space:
-	vs_out.position_ES = (View * Model * pos4).xyz;
-	vs_out.normal_ES = normalize(NormalMatrix * normal);
-
-	vs_out.light = light;
-  vs_out.lightSource_ES = mat3(View) * light.position;
   vs_out.texCoords = vertexUV;
   vs_out.fragPosLightSpace = LightSpaceMatrix * Model * pos4;
 
-	gl_Position = Perspective * View * Model * pos4;
+	vs_out.light = light;
 
   vec3 T = normalize(NormalMatrix * aTangent);
-  vec3 B = normalize(NormalMatrix * aBitangent);
   vec3 N = normalize(NormalMatrix * normal);
+
+  T = normalize(T-dot(T,N) * N);
+  vec3 B = cross(N,T);
+
   mat3 TBN = transpose(mat3(T,B,N));
 
   vs_out.TangentLightPos = TBN * light.position;
   vs_out.TangentViewPos = TBN * viewPos;
   vs_out.TangentFragPos = TBN * vec3(Model * pos4);
+  
 
-  if (T.x < -5000)
-    gl_Position = vec4(TBN * position,1.0);
-
+	gl_Position = Perspective * View * Model * pos4;
 }

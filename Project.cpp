@@ -9,7 +9,7 @@ using namespace std;
 #include "JointNode.hpp"
 #include "PerlinNoise.hpp"
 #include "stb_image.h"
-
+#include <algorithm>
 
 #include <imgui/imgui.h>
 
@@ -35,13 +35,11 @@ Project::Project(const std::string & luaSceneFile)
 	  m_normalAttribLocation(0),
 	  m_uvAttribLocation(0),
 	  m_tangentAttribLocation(0),
-	  m_bitangentAttribLocation(0),
 	  m_vao_meshData(0),
 	  m_vbo_vertexPositions(0),
 	  m_vbo_vertexNormals(0),
 	  m_vbo_vertexUVs(0),
-	  m_vbo_vertexTangents(0),
-	  m_vbo_vertexBitangents(0)
+	  m_vbo_vertexTangents(0)
 {
   m_viewPos = vec3(0,5,-10);
 }
@@ -150,6 +148,7 @@ void Project::loadTextures() {
     m_textureNameIdMap[it->second.texture] = 0;
   }
   
+  {
   // Number of unique texture ptrs
   int numTextures = 1;//m_textureNameIdMap.size();
   DEBUGM(cerr << "numTextures " << numTextures << endl);
@@ -157,6 +156,34 @@ void Project::loadTextures() {
   glGenTextures(numTextures, m_textures);
 
   glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  int width, height, nrChannels;
+  std::string textureFilename = "Assets/cube-export-uv-layout-col.jpg"; //getAssetFilePath(textureName.c_str());
+  DEBUGM(cerr << "loading texture " << textureFilename << endl);
+  unsigned char *data = stbi_load(textureFilename.c_str(), &width, &height, &nrChannels, 0);
+  if (data) {
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+      //glGenerateMipmap(GL_TEXTURE_2D);
+  } else {
+      std::cout << "Failed to load texture" << std::endl;
+  }
+  m_textureNameIdMap[textureFilename] = m_textures[0];
+
+  CHECK_GL_ERRORS; // we might run out of space
+  glBindTexture(GL_TEXTURE_2D,0);
+
+  }
+
+
+  {
+  glGenTextures(1, &m_normalMap);
+
+  glBindTexture(GL_TEXTURE_2D, m_normalMap);
 
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
@@ -173,10 +200,12 @@ void Project::loadTextures() {
   } else {
       std::cout << "Failed to load texture" << std::endl;
   }
-  m_textureNameIdMap[textureFilename] = m_textures[0];
 
   CHECK_GL_ERRORS; // we might run out of space
   glBindTexture(GL_TEXTURE_2D,0);
+
+  }
+
   /*
   unsigned int texturesIt = 0;
   for (map<string, GLuint>::iterator it = m_textureNameIdMap.begin(); it != m_textureNameIdMap.end(); it++, texturesIt++) {
@@ -273,9 +302,6 @@ void Project::enableVertexShaderInputSlots()
 
 		CHECK_GL_ERRORS;
 
-    // Enable the vertex shader attribute location for "uv" when rendering.
-    m_bitangentAttribLocation = m_shader.getAttribLocation("aBitangent");
-    glEnableVertexAttribArray(m_bitangentAttribLocation);
 
 		CHECK_GL_ERRORS;
 	}
@@ -349,17 +375,6 @@ void Project::uploadVertexDataToVbos (
     CHECK_GL_ERRORS;
   }
 
-  {
-    glGenBuffers(1, &m_vbo_vertexBitangents);
-
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexBitangents);
-
-    glBufferData(GL_ARRAY_BUFFER, meshConsolidator.getNumVertexBitangentBytes(),
-        meshConsolidator.getVertexBitangentDataPtr(), GL_STATIC_DRAW);
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    CHECK_GL_ERRORS;
-  }
 }
 
 //----------------------------------------------------------------------------------------
@@ -386,9 +401,6 @@ void Project::mapVboDataToVertexShaderInputLocations()
 
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexTangents);
     glVertexAttribPointer(m_tangentAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
-
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexBitangents);
-    glVertexAttribPointer(m_bitangentAttribLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
 
     //-- Unbind target, and restore default values:
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -426,12 +438,12 @@ void Project::initViewMatrix() {
 //----------------------------------------------------------------------------------------
 void Project::initLightSources() {
 	// World-space position
-	m_light.position = vec3(-2,5,-5);
+	m_light.position = vec3(2,10,-10);
 	m_light.rgbIntensity = vec3(0.8f); // White light
 
   // glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, 0.0f, 50.0f)
 	float aspect = ((float)m_windowWidth) / m_windowHeight;
-  m_lightSpaceMatrix =glm::perspective<float>(glm::radians(45.0f), 1.0f, 2.0f, 50.0f) *
+  m_lightSpaceMatrix = glm::perspective<float>(glm::radians(45.0f), 1.0f, 2.0f, 50.0f) *
     glm::lookAt(m_light.position, 
                 glm::vec3( 0.0f, 0.0f,  0.0f), 
                 glm::vec3( 0.0f, 1.0f,  0.0f));
@@ -488,6 +500,9 @@ void Project::uploadCommonSceneUniforms() {
   m_depthMapShader.disable();
 }
 
+//TODO temporary
+static int frame = 0;
+
 //----------------------------------------------------------------------------------------
 /*
  * Called once per frame, before guiLogic().
@@ -495,7 +510,9 @@ void Project::uploadCommonSceneUniforms() {
 void Project::appLogic()
 {
 	// Place per frame, application logic here ...
+  frame = (frame + 1)%100;
 
+  m_rootNode->children.front()->translate(vec3(0.03 * glm::sign(50-frame),0,0));
 	uploadCommonSceneUniforms();
 }
 
@@ -558,7 +575,7 @@ void Project::updateShaderUniforms(
 
 		//-- Set NormMatrix:
 		location = shader.getUniformLocation("NormalMatrix");
-    mat3 normalMatrix = glm::transpose(glm::inverse(mat3(viewMatrix * nodeTrans)));
+    mat3 normalMatrix = glm::transpose(glm::inverse(mat3(nodeTrans)));
     glUniformMatrix3fv(location, 1, GL_FALSE, value_ptr(normalMatrix));
     CHECK_GL_ERRORS;
 
@@ -573,6 +590,9 @@ void Project::updateShaderUniforms(
     CHECK_GL_ERRORS;
     location = shader.getUniformLocation("material.shininess");
     glUniform1f(location, node->material.shininess);
+    CHECK_GL_ERRORS;
+    location = shader.getUniformLocation("material.transparency");
+    glUniform1f(location, node->material.transparency);
     CHECK_GL_ERRORS;
 	} else if (shader.getProgramObject() == m_depthMapShaderID) {
 		GLint location = shader.getUniformLocation("Model");
@@ -593,9 +613,11 @@ void Project::draw() {
   glBindFramebuffer(GL_FRAMEBUFFER, m_fbo_depthMap);
   glEnable(GL_DEPTH_TEST);
   glClear(GL_DEPTH_BUFFER_BIT);
+  glEnable(GL_CULL_FACE);
   glCullFace(GL_FRONT);
   renderSceneGraph(m_depthMapShader, *m_rootNode);
   glCullFace(GL_BACK);
+  glDisable(GL_CULL_FACE);
   glDisable(GL_DEPTH_TEST);
   glBindFramebuffer(GL_FRAMEBUFFER, 0); 
 
@@ -606,19 +628,84 @@ void Project::draw() {
   m_shader.enable();
   GLuint location = m_shader.getUniformLocation("textureSampler");
   glUniform1i(location, 0);
-  location = m_shader.getUniformLocation("shadowMap");
+  location = m_shader.getUniformLocation("normalMap");
   glUniform1i(location, 1);
+  location = m_shader.getUniformLocation("shadowMap");
+  glUniform1i(location, 2);
   m_shader.disable();
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glBindTexture(GL_TEXTURE_2D, m_noiseTexture);
   glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_normalMap);
+  glActiveTexture(GL_TEXTURE2);
   glBindTexture(GL_TEXTURE_2D, m_depthMap);
+
   glEnable( GL_DEPTH_TEST );
   renderSceneGraph(m_shader, *m_rootNode);
+
+  glEnable(GL_CULL_FACE);
+  
+  {
+    glBindVertexArray(m_vao_meshData);
+    vector<pair<const GeometryNode *,mat4>> transparentNodes;
+    collectTransparentNodesRecursive(*m_rootNode, mat4(), transparentNodes);
+    vector<float> centroidDistToCamera(transparentNodes.size());
+    for (int i = 0; i < centroidDistToCamera.size(); i++) {
+      auto p = transparentNodes[i];
+      vec3 nodeCentroid = m_batchInfoMap[p.first->meshId].centroid;
+      centroidDistToCamera[i] = glm::distance(vec3(p.second * vec4(nodeCentroid,1.0)), m_viewPos);
+    }
+    
+    vector<int> tNodeId(transparentNodes.size());
+    for (int i = 0; i < tNodeId.size(); i++) { tNodeId[i] = i;}
+
+    sort(tNodeId.begin(), tNodeId.end(), [centroidDistToCamera](int i, int j) {
+        return centroidDistToCamera[i] > centroidDistToCamera[j];
+    });
+
+    for (int i = 0; i < tNodeId.size(); i++) {
+      auto p = transparentNodes[tNodeId[i]];
+      
+      updateShaderUniforms(m_shader, p.first, p.second, m_view);
+      CHECK_GL_ERRORS;
+
+      // Get the BatchInfo corresponding to the GeometryNode's unique MeshId.
+      BatchInfo batchInfo = m_batchInfoMap[p.first->meshId];
+
+      //-- Now render the mesh:
+      m_shader.enable();
+      glDrawArrays(GL_TRIANGLES, batchInfo.startIndex, batchInfo.numIndices);
+      m_shader.disable();
+    }
+
+    glBindVertexArray(0);
+  }
+  
+  glDisable(GL_CULL_FACE);
+
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  glDisable(GL_BLEND);
   glDisable( GL_DEPTH_TEST );
 
+
   CHECK_GL_ERRORS;
+}
+
+void Project::collectTransparentNodesRecursive(const SceneNode &root, const glm::mat4 &parentTransform, std::vector<std::pair<const GeometryNode *, glm::mat4> > &transparentNodes) {
+  glm::mat4 myTrans = parentTransform * root.get_transform();
+  for (const SceneNode * node : root.children) {
+    collectTransparentNodesRecursive(*node, myTrans, transparentNodes);
+  }
+
+  if (root.m_nodeType != NodeType::GeometryNode) return;
+
+  const GeometryNode * geometryNode = static_cast<const GeometryNode *>(&root);
+
+  if (geometryNode->material.transparency == 1) return;
+
+  transparentNodes.push_back(make_pair(geometryNode, myTrans));
 }
 
 //----------------------------------------------------------------------------------------
@@ -633,7 +720,8 @@ void Project::renderSceneGraph(const ShaderProgram &shader, const SceneNode & ro
 	CHECK_GL_ERRORS;
 }
 
-void Project::renderSceneGraphRecursive(const ShaderProgram &shader, const mat4 &parentTransform, const SceneNode &root) {
+// only renders non-transparent objects
+void Project::renderSceneGraphRecursive(const ShaderProgram &shader, const mat4 &parentTransform, const SceneNode &root){
   glm::mat4 myTrans = parentTransform * root.get_transform();
   for (const SceneNode * node : root.children) {
     renderSceneGraphRecursive(shader, myTrans, *node);
@@ -642,6 +730,7 @@ void Project::renderSceneGraphRecursive(const ShaderProgram &shader, const mat4 
   if (root.m_nodeType != NodeType::GeometryNode) return;
 
   const GeometryNode * geometryNode = static_cast<const GeometryNode *>(&root);
+  if (geometryNode->material.transparency < 1) return;
 
   updateShaderUniforms(shader, geometryNode, myTrans, m_view);
 

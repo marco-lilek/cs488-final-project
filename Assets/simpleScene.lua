@@ -17,22 +17,36 @@ cubeMesh:set_material(gr.material({1, 1, 1}, {1, 1, 1}, 10.0))
 -- Add the cubeMesh GeometryNode to the child list of rootnode.
 rootNode:add_child(cubeMesh)
 
---[[
 -- Create a GeometryNode with MeshId = 'sphere', and name = 'head'.
 sphereMesh = gr.mesh('sphere', 'name-of-sphere')
 sphereMesh:scale(0.5, 0.5, 0.5)
-sphereMesh:translate(0.0, 0.5, 0.0)
+sphereMesh:translate(3.0, 1, 0.0)
 sphereMesh:set_material(gr.material({1, 1, 1}, {1, 1, 1}, 50.0))
 -- Add the sphereMesh GeometryNode to the child list of rootnode.
 rootNode:add_child(sphereMesh)
 
+--[[
+sphereMesh = gr.mesh('sphere', 'name-of-sphere2')
+sphereMesh:scale(0.5, 0.5, 0.5)
+sphereMesh:translate(1.0, 1, 0.0)
+sphereMesh:set_material(gr.material({1, 1, 1}, {1, 1, 1}, 50.0))
+-- Add the sphereMesh GeometryNode to the child list of rootnode.
+rootNode:add_child(sphereMesh)
 --]]
 floorMesh = gr.mesh('cube', 'cubie')
 floorMesh:scale(5,1,5);
 floorMesh:rotate('x', -15.0)
 floorMesh:translate(0,-1.5,0);
-floorMesh:set_material(gr.material({1, 1, 1}, {1, 1, 1}, 10.0))
+floorMesh:set_material(gr.material({1, 1, 1}, {1, 1, 1}, 10.0, 0.1))
 rootNode:add_child(floorMesh);
+
+
+windowMesh = gr.mesh('cube', 'cubie2')
+windowMesh:scale(3,1,3);
+windowMesh:rotate('x', -15.0)
+windowMesh:translate(-3,0,0);
+windowMesh:set_material(gr.material({1, 1, 1}, {1, 1, 1}, 10.0, 0.1))
+rootNode:add_child(windowMesh);
 
 -- Return the root with all of it's childern.  The SceneNode A3::m_rootNode will be set
 -- equal to the return value from this Lua script.
