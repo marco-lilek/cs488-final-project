@@ -10,7 +10,8 @@ includeDirList = {
 }
 
 libDirectories = { 
-    "../lib"
+    "../lib",
+    "/usr/lib/x86_64-linux-gnu"
 }
 
 
@@ -40,7 +41,11 @@ if os.get() == "linux" then
         "stdc++",
         "dl",
         "pthread",
-        "openal"
+        "vorbis",
+        "vorbisenc",
+        "vorbisfile",
+        "openal",
+        "audio",
     }
 end
 

@@ -5,6 +5,7 @@
 #include "cs488-framework/ShaderProgram.hpp"
 #include "cs488-framework/MeshConsolidator.hpp"
 
+#include "SoundManager.hpp"
 #include "SceneNode.hpp"
 #include "SceneGraphShader.hpp"
 
@@ -142,5 +143,6 @@ public:
 
   std::set<GeometryNode *> m_fixedBubbles;
 
+  SoundManager m_soundManager;
   friend class SceneGraphShader;
 };

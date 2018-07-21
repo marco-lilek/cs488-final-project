@@ -8,6 +8,7 @@ using namespace std;
 #include "GeometryNode.hpp"
 #include "JointNode.hpp"
 #include "PerlinNoise.hpp"
+
 #include "stb_image.h"
 #include <algorithm>
 
@@ -44,7 +45,8 @@ Project::Project(const std::string & luaSceneFile)
 	  m_vbo_vertexPositions(0),
 	  m_vbo_vertexNormals(0),
 	  m_vbo_vertexUVs(0),
-	  m_vbo_vertexTangents(0)
+	  m_vbo_vertexTangents(0),
+    m_soundManager(3)
 {
   m_viewPos = vec3(-0.6,5,-10);
 }
@@ -117,6 +119,8 @@ void Project::init()
   loadNoiseTexture();
 
   initGameLogic();
+
+  m_soundManager.init();
 }
 
 void Project::initWindowFBO(GLuint *fbo, GLuint *tex) {
@@ -846,6 +850,7 @@ bool Project::windowResizeEvent (
 	return eventHandled;
 }
 
+static ALuint sdfs = 0;
 //----------------------------------------------------------------------------------------
 /*
  * Event handler.  Handles key input events.
@@ -865,6 +870,16 @@ bool Project::keyInputEvent (
     if (key == GLFW_KEY_Q) {
 			glfwSetWindowShouldClose(m_window, GL_TRUE);
       eventHandled = true;
+    }
+    if (key == GLFW_KEY_F) {
+      m_soundManager.playSound("bazinga");
+    }
+
+    if (key == GLFW_KEY_G) {
+      m_soundManager.stopSound(sdfs);
+    }
+    if (key == GLFW_KEY_D) {
+      sdfs = m_soundManager.playBackground("bg1");
     }
 
 	}
