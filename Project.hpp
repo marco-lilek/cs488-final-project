@@ -6,10 +6,13 @@
 #include "cs488-framework/MeshConsolidator.hpp"
 
 #include "SceneNode.hpp"
+#include "SceneGraphShader.hpp"
 
 #include <glm/glm.hpp>
 #include <memory>
 #include <map>
+#include <string>
+#include <set>
 
 struct LightSource {
 	glm::vec3 position;
@@ -40,24 +43,33 @@ protected:
 
 	//-- One time initialization methods:
 	void processLuaSceneFile(const std::string & filename);
-	void createShaderProgram();
-	void enableVertexShaderInputSlots();
-	void uploadVertexDataToVbos(const MeshConsolidator & meshConsolidator);
+  void enableVertexShaderInputSlots();
+  void setTextureMaps();
+  void initWindowFBO(GLuint *fbo, GLuint *tex);
 	void mapVboDataToVertexShaderInputLocations();
+  void createShader(ShaderProgram &program, const std::string &vs, const std::string &fs);
+
+	void uploadVertexDataToVbos(const MeshConsolidator & meshConsolidator);
 	void initViewMatrix();
 	void initLightSources();
 
 	void initPerspectiveMatrix();
 	void uploadCommonSceneUniforms();
-void updateShaderUniforms(
-		const ShaderProgram & shader,
-    const GeometryNode *node,
-		const glm::mat4 & nodeTrans,
-		const glm::mat4 & viewMatrix
-);
-	void renderSceneGraph(const ShaderProgram &shader,const SceneNode &node);
-  void renderSceneGraphRecursive(const ShaderProgram &shader, const glm::mat4 &parentTransform, const SceneNode &root);
+	void renderSceneGraph(const SceneGraphShader &shader,const SceneNode &node, bool renderTransparent = false);
+  void renderSceneGraphRecursive(const SceneGraphShader &shader, const glm::mat4 &parentTransform, const SceneNode &root, bool renderTransparent);
+
+  void renderTransparentNodes(const SceneGraphShader &shader, const SceneNode &root);
 	void renderArcCircle();
+
+
+  void loadTextures();
+  void loadTexture(const std::string &texture, char *defaultData);
+  void loadTexturesFromList(std::set<std::string> &textures, std::map<std::string, GLuint> &nameMap, GLuint *texs, char *defaultData);
+
+public:
+  
+  std::map<std::string, GLuint> m_bumpNameIdMap;
+  GLuint *m_bumps;
 
 	glm::mat4 m_perpsective;
 	glm::mat4 m_view;
@@ -73,10 +85,9 @@ void updateShaderUniforms(
 	GLint m_positionAttribLocation;
 	GLint m_normalAttribLocation;
 	GLint m_uvAttribLocation;
-	ShaderProgram m_shader;
+	SceneGraphShader *m_shader;
 
   std::map<std::string, GLuint> m_textureNameIdMap;
-  void loadTextures();
   GLuint *m_textures;
 
   GLuint m_fbo_depthMap;
@@ -84,11 +95,7 @@ void updateShaderUniforms(
   GLuint m_depthPositionAttribLocation;
   GLuint m_depthMap;
   void initDepthMapFBO();
-  void createDepthMapShaderProgram();
-  ShaderProgram m_depthMapShader;
-
-  GLuint m_shaderID;
-  GLuint m_depthMapShaderID;
+  SceneGraphShader *m_depthMapShader;
 
   GLuint m_noiseTexture;
   void loadNoiseTexture();
@@ -100,6 +107,19 @@ void updateShaderUniforms(
 
   GLuint m_normalMap;
 
+  GLuint m_fbo_blurredScreen;
+  GLuint m_blurredScreen;
+  GLuint m_fbo_lastScreen;
+  GLuint m_lastScreen;
+  GLuint m_vao_screen;
+  
+  ShaderProgram m_screenShader;
+  GLuint m_aPosAttribLocation;
+  GLuint m_aTexCoordsAttribLocation;
+  GLuint m_vbo_screenData;
+  
+  void initBlurFBO();
+
 	// BatchInfoMap is an associative container that maps a unique MeshId to a BatchInfo
 	// object. Each BatchInfo object contains an index offset and the number of indices
 	// required to render the mesh with identifier MeshId.
@@ -109,4 +129,18 @@ void updateShaderUniforms(
 
 	std::shared_ptr<SceneNode> m_rootNode;
   void collectTransparentNodesRecursive(const SceneNode &root, const glm::mat4 &parentTransform, std::vector<std::pair<const GeometryNode *, glm::mat4> > &transparentNodes);
+
+  void hookControls(std::vector<GeometryNode*> &nodes);
+  GeometryNode * m_playerNode;
+
+  void tickGameLogic();
+  void tickBubbleMovement();
+  void initGameLogic();
+
+  void checkBBoxCollisions();
+  void checkBBlCollisions();
+
+  std::set<GeometryNode *> m_fixedBubbles;
+
+  friend class SceneGraphShader;
 };

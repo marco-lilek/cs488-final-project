@@ -221,6 +221,7 @@ int gr_node_add_child_cmd(lua_State* L)
   luaL_argcheck(L, selfdata != 0, 1, "Node expected");
 
   SceneNode* self = selfdata->node;
+  assert(self->m_nodeType != NodeType::GeometryNode); // should not have children
   
   gr_node_ud* childdata = (gr_node_ud*)luaL_checkudata(L, 2, "gr.node");
   luaL_argcheck(L, childdata != 0, 2, "Node expected");
@@ -229,6 +230,29 @@ int gr_node_add_child_cmd(lua_State* L)
 
   self->add_child(child);
 
+  return 0;
+}
+
+extern "C"
+int gr_node_set_texture_cmd(lua_State *L) {
+  GRLUA_DEBUG_CALL;
+  
+  gr_node_ud* selfdata = (gr_node_ud*)luaL_checkudata(L, 1, "gr.node");
+  luaL_argcheck(L, selfdata != 0, 1, "Node expected");
+
+  GeometryNode* self = dynamic_cast<GeometryNode*>(selfdata->node);
+
+  luaL_argcheck(L, self != 0, 1, "Geometry node expected");
+
+  const char* name = luaL_checkstring(L, 2);
+  self->texture = name;
+
+  if (lua_gettop(L) == 3) {
+    name = luaL_checkstring(L, 3);
+    self->bumpMap = name;
+  }
+
+  cerr << self->texture << " " << self->bumpMap << endl;
   return 0;
 }
 
@@ -378,6 +402,7 @@ static const luaL_Reg grlib_node_methods[] = {
   {"scale", gr_node_scale_cmd},
   {"rotate", gr_node_rotate_cmd},
   {"translate", gr_node_translate_cmd},
+  {"set_texture", gr_node_set_texture_cmd},
   {0, 0}
 };
 

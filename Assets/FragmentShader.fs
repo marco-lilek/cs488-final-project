@@ -45,8 +45,11 @@ void main() {
 
   vec3 normal;
   normal = texture(normalMap, fs_in.texCoords).rgb;
-  normal = normalize(normal*2.0 - 1.0);
-  
+  if (normal.x == 0)
+    normal = vec3(0,0,1);
+  else
+    normal = normalize(normal*2.0 - 1.0);
+
   vec3 color = texture(textureSampler, fs_in.texCoords).rgb;
   vec3 ambient = ambientIntensity * color;
  
@@ -61,22 +64,21 @@ void main() {
   vec3 projCoords = fs_in.fragPosLightSpace.xyz / fs_in.fragPosLightSpace.w;
   projCoords = projCoords * 0.5 + 0.5;
 
-  float biasMAX = 0.01;
-  float bias = 0.01; //clamp(biasMAX*tan(acos(clamp(dot(normal, lightDir),0,1))),0,biasMAX);
+  float biasMAX = 0.00001;
+  float bias = clamp(biasMAX* (1.0 - dot(normal, lightDir)),0,biasMAX);
   float currentDepth = projCoords.z;
 
-  float shadow = 1; 
+  float shadow = 0; 
   for (int i = 0; i < 4; i++) {
     float closestDepth = texture(shadowMap, projCoords.xy + poissondist[i]/700,0).r;
 
-    if (currentDepth - bias < closestDepth) {
-      shadow -= 0.25;
+    if (currentDepth - bias > closestDepth) {
+      shadow += 0.25;
     }
   }
 
   if (projCoords.z > 1.0)
     shadow = 0.0;
 
-
-  fragColour = vec4(ambient + (1-shadow)*(diffuse + specular), material.transparency);
+  fragColour = vec4(ambient + (1-shadow)*(diffuse + specular),material.transparency);
 }

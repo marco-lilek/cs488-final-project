@@ -4,9 +4,12 @@
 
 #include <glm/glm.hpp>
 
+#include <vector>
 #include <list>
 #include <string>
 #include <iostream>
+
+class GeometryNode;
 
 enum class NodeType {
 	SceneNode,
@@ -24,7 +27,8 @@ public:
     
 	int totalSceneNodes() const;
     
-    const glm::mat4& get_transform() const;
+    virtual const glm::mat4 get_transform() const;
+    virtual void scale(const glm::vec3 & amount);
     const glm::mat4& get_inverse() const;
     
     void set_transform(const glm::mat4& m);
@@ -35,7 +39,6 @@ public:
 
 	//-- Transformations:
     void rotate(char axis, float angle);
-    void scale(const glm::vec3& amount);
     void translate(const glm::vec3& amount);
 
 
@@ -53,6 +56,7 @@ public:
 	std::string m_name;
 	unsigned int m_nodeId;
 
+void getGeometryNodes(std::vector<GeometryNode *> &nodes);
 
 private:
 	// The number of SceneNode instances.

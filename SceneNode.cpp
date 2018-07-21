@@ -2,15 +2,16 @@
 
 #include "cs488-framework/MathUtils.hpp"
 
+#include "GeometryNode.hpp"
 #include <iostream>
 #include <sstream>
+#include <vector>
 using namespace std;
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
 
 using namespace glm;
-
 
 // Static class variable
 unsigned int SceneNode::nodeInstanceCount = 0;
@@ -54,7 +55,7 @@ void SceneNode::set_transform(const glm::mat4& m) {
 }
 
 //---------------------------------------------------------------------------------------
-const glm::mat4& SceneNode::get_transform() const {
+const glm::mat4 SceneNode::get_transform() const {
 	return trans;
 }
 
@@ -108,6 +109,16 @@ void SceneNode::translate(const glm::vec3& amount) {
 //---------------------------------------------------------------------------------------
 int SceneNode::totalSceneNodes() const {
 	return nodeInstanceCount;
+}
+
+void SceneNode::getGeometryNodes(std::vector<GeometryNode *> &nodes) {
+  if (m_nodeType == NodeType::GeometryNode) {
+    nodes.push_back(dynamic_cast<GeometryNode *>(this));
+  }
+  
+  for (auto child: children) {
+    child->getGeometryNodes(nodes);
+  }
 }
 
 //---------------------------------------------------------------------------------------

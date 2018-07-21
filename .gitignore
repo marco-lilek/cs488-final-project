@@ -3,3 +3,6 @@ Project
 Makefile
 compile_commands.json
 compile_commands/
+Project.*.trace
+Project.trace
+tags
