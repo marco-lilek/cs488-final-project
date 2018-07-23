@@ -18,10 +18,6 @@ uniform mat4 Model;
 uniform mat4 View;
 uniform mat4 Perspective;
 
-// Remember, this is transpose(inverse(ModelView)).  Normals should be
-// transformed using this matrix instead of the ModelView matrix.
-uniform mat3 NormalMatrix;
-
 out VsOutFsIn {
   vec2 texCoords;
   vec4 fragPosLightSpace;
@@ -31,6 +27,7 @@ out VsOutFsIn {
   vec3 TangentViewPos;
   vec3 TangentFragPos;
 
+  vec3 correctNormal;
 } vs_out;
 
 void main() {
@@ -41,6 +38,7 @@ void main() {
 
 	vs_out.light = light;
 
+  mat3 NormalMatrix = transpose(inverse(mat3(Model)));
   vec3 T = normalize(NormalMatrix * aTangent);
   vec3 N = normalize(NormalMatrix * normal);
 
@@ -49,10 +47,10 @@ void main() {
 
   mat3 TBN = transpose(mat3(T,B,N));
 
-  vs_out.TangentLightPos = TBN * light.position;
+  vs_out.TangentLightPos =TBN* light.position;
   vs_out.TangentViewPos = TBN * viewPos;
-  vs_out.TangentFragPos = TBN * vec3(Model * pos4);
+  vs_out.TangentFragPos = TBN*vec3(Model * pos4);
   
-
+  vs_out.correctNormal = TBN*NormalMatrix * normal;
 	gl_Position = Perspective * View * Model * pos4;
 }

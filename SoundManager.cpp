@@ -9,12 +9,14 @@
 
 using namespace std;
 
-static const size_t NUM_BG_BUFFERS = 16;
+static const size_t NUM_BG_BUFFERS = 20;
 static const size_t DATA_CHUNK_SIZE = 4096;
 
 static string assetFilePath = "./Assets/";
 
 static std::mutex sourceLock;
+static std::mutex soundNameMapLock;
+static std::mutex stopSoundLock;
 
 std::string printError(ALenum error) {
     if(error == AL_INVALID_NAME)
@@ -42,15 +44,25 @@ std::string printError(ALenum error) {
 }
 
 SoundManager::SoundManager(uint8_t numSources) {
-  m_soundBufferMap["test1.wav"] = 0;
+  m_soundBufferMap["bazinga.wav"] = 0;
+  m_soundBufferMap["blop-q2.wav"] = 0;
+  m_soundBufferMap["applause3.wav"] = 0;
+  m_soundBufferMap["sadtrombone.wav"] = 0;
 
-  m_soundNameMap["bazinga"] = "test1.wav";
+  m_soundNameMap["bazinga"] = "bazinga.wav";
+  m_soundNameMap["blop"] = "blop-q2.wav";
+  m_soundNameMap["applause"] = "applause3.wav";
+  m_soundNameMap["sad"] = "sadtrombone.wav";
 
-  m_bgSoundNameMap["bg1"] = "test1.ogg";
+  m_bgSoundNameMap["background"] = "background.ogg";
 }
 
 SoundManager::~SoundManager() {
   delete[] m_buffers;
+  auto device = alcGetContextsDevice(m_context);
+  alcMakeContextCurrent(NULL);
+  alcDestroyContext(m_context);
+  alcCloseDevice(device);
 }
 
 static void list_audio_devices(const ALCchar *devices)
@@ -123,7 +135,7 @@ void SoundManager::loadSounds() {
     char *bufferData = (char*)malloc(wave->dataSize);
     assert(bufferData);
     assert(WaveReadFile(bufferData, wave->dataSize, wave) != -1);
-    alBufferData(m_buffers[0], getFormat(wave->channels, wave->bitsPerSample), bufferData, wave->dataSize, wave->sampleRate);
+    alBufferData(m_buffers[i], getFormat(wave->channels, wave->bitsPerSample), bufferData, wave->dataSize, wave->sampleRate);
     CHECK_SOUND_ERRORS;
 
     m_soundBufferMap[elm.first] = m_buffers[i];
@@ -143,8 +155,7 @@ void SoundManager::loadSounds() {
   sourceLocks[sourceId].unlock();
 }*/
 
-void playSoundNewSourceThread(ALuint source, ALuint buffer, string s) {
-  setupSource(source);
+void playSoundTh(ALuint source, ALuint buffer, string s) {
   alSourcei(source, AL_BUFFER, buffer);
   alSourcePlay(source);
   while (true) {
@@ -159,6 +170,7 @@ void playSoundNewSourceThread(ALuint source, ALuint buffer, string s) {
 
   CHECK_SOUND_ERRORS;
   cerr << "played " << s << endl;
+  cerr << "buffer " << buffer << endl;
 }
 
 /*void SoundManager::playSound(const string &s, Source source) {
@@ -173,8 +185,9 @@ void playSoundNewSourceThread(ALuint source, ALuint buffer, string s) {
 ALuint SoundManager::playSound(const string &s) {
   ALuint source;
   alGenSources(1, &source);
+  setupSource(source);
   assert(m_soundNameMap.count(s) > 0);
-  thread t(playSoundNewSourceThread, source, m_soundBufferMap[m_soundNameMap[s]], s); 
+  thread t(playSoundTh, source, m_soundBufferMap[m_soundNameMap[s]], s); 
   t.detach();
 
   CHECK_SOUND_ERRORS;
@@ -189,7 +202,6 @@ void SoundManager::stopSound(ALuint source) {
 }
 
 static void playBackgroundTh(ALuint source, string fname) {
-  setupSource(source);
   ALuint *buffers = new ALuint[NUM_BG_BUFFERS];
   alGenBuffers(NUM_BG_BUFFERS, buffers);
 
@@ -237,6 +249,11 @@ static void playBackgroundTh(ALuint source, string fname) {
   CHECK_SOUND_ERRORS;
   
   sourceLock.lock();
+
+  ALint state;
+  alGetSourcei(source, AL_SOURCE_STATE, &state);
+  cerr << state << endl;
+
   cerr << "played BG " << fname << endl;
   delete[] dataChunk;
   fclose(fp);
@@ -246,13 +263,41 @@ static void playBackgroundTh(ALuint source, string fname) {
   sourceLock.unlock();
 }
 
-ALuint SoundManager::playBackground(const string &s) {
-  ALuint source;
-  alGenSources(1, &source);
+void loopBackgroundTh(std::map<int, ALuint> *bgSoundIdSourceId, std::set<BGSoundId> *bgStoppedSounds, BGSoundId bgSoundId, string fname) {
+  while (true) {
+    if (bgStoppedSounds->count(bgSoundId) > 0) break;
+    ALuint source;
+    alGenSources(1, &source);
+    setupSource(source);
+    alSourcef(source, AL_GAIN, 0.5);
+
+    soundNameMapLock.lock();
+    (*bgSoundIdSourceId)[bgSoundId] = source;
+    soundNameMapLock.unlock();
+
+    thread t(playBackgroundTh, source, fname);
+    t.join();
+  }
+}
+
+void SoundManager::stopBGSound(BGSoundId id) {
+  assert(m_bgSoundIdSourceId.count(id) > 0);
+  stopSoundLock.lock();
+  m_stoppedSounds.insert(id);
+  stopSoundLock.unlock();
+  stopSound(m_bgSoundIdSourceId[id]);
+}
+
+
+static int numBGSounds = 0;
+
+BGSoundId SoundManager::playBackground(const string &s) {
   assert(m_bgSoundNameMap.count(s) > 0);
-  thread t(playBackgroundTh, source, assetFilePath + m_bgSoundNameMap[s]);
+  assert(numBGSounds < 1000000); // should be enough
+  int bgSoundId = numBGSounds++;
+  thread t(loopBackgroundTh, &m_bgSoundIdSourceId, &m_stoppedSounds, bgSoundId, assetFilePath + m_bgSoundNameMap[s]);
   t.detach();
 
   CHECK_SOUND_ERRORS;
-  return source;
+  return bgSoundId;
 }

@@ -6,7 +6,7 @@
 class PerlinNoise {
 public:
   PerlinNoise();
-  std::shared_ptr<char> getNoise();
+  char* getNoise();
 
   static const size_t NOISE_DIM = 512;
 private:

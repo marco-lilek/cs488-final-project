@@ -46,6 +46,7 @@ if os.get() == "linux" then
         "vorbisfile",
         "openal",
         "audio",
+        "assimp"
     }
 end
 
@@ -73,9 +74,9 @@ solution "CS488-Projects"
         files { "*.cpp" }
 
     configuration "Debug"
-        defines { "DEBUG" }
+        defines { "DEBUG", "DEBUG_MESSAGE" }
         flags { "Symbols" }
 
     configuration "Release"
-        defines { "NDEBUG" }
+        defines { }
         flags { "Optimize" }

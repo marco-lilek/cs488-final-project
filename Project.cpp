@@ -18,6 +18,7 @@ using namespace std;
 #include <glm/gtx/io.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/vector_angle.hpp>
+#include <fstream>
 
 #include <set>
 #include <string>
@@ -26,11 +27,49 @@ using namespace glm;
 
 // NOTE: x is inverted
 
+static const string LEVELFILE = "level.txt";
 static bool show_gui = true;
+static const string HIDDEN = "~hidden";
+static const float SPHERE_RAD = 0.5;
+static const size_t CIRCLE_PTS = 48;
+static const size_t SHADOW_DIM = 1024;
+static const size_t SHADOW_WIDTH = SHADOW_DIM, SHADOW_HEIGHT = SHADOW_DIM;
+static const vec3 CANNON_POS(0,-6,0);
 
-const size_t CIRCLE_PTS = 48;
-const size_t SHADOW_DIM = 1024;
-const size_t SHADOW_WIDTH = SHADOW_DIM, SHADOW_HEIGHT = SHADOW_DIM;
+static const float ROT_SPEED = 1;
+static const float ROT_MAX = 10;
+
+static const float STARTTOP = 6;
+static float boardTop = STARTTOP;
+static const float BOARD_BOTTOM = -10;
+static const float BOARD_SIDE = 4.75;
+static float BUBBLE_SPEED = 0.2;
+static float EPSILON = 0.0001;
+
+static const float GRID_WIDTH = 9;
+static const float START_GRID_HEIGHT = 11;
+static float gridHeight = START_GRID_HEIGHT;
+static float GRID_YOFFSET;
+static const float XBOARDCORNER = 4.25;
+
+static const size_t NUM_BUBBLETYPES = 5;
+static const size_t MIN_GROUPSIZE = 3;
+
+static vector<vector<BubbleNode *>> bubbleGrid;
+
+static vector<SceneNode *> bubbleTypes;
+static vector<vec3> btRot;
+
+#include <cstdlib>
+#include <ctime>
+
+static const size_t TURNS_UNTIL_LOWER = 4;
+static size_t curTurnsUntilLower;
+
+static BGSoundId bgSoundId;
+static const int RAND_PRECIS = 1000;
+
+static bool cycleTypes = false;
 
 //----------------------------------------------------------------------------------------
 // Constructor
@@ -46,19 +85,45 @@ Project::Project(const std::string & luaSceneFile)
 	  m_vbo_vertexNormals(0),
 	  m_vbo_vertexUVs(0),
 	  m_vbo_vertexTangents(0),
-    m_soundManager(3)
+    m_soundManager(3),
+    m_cannonAngle(90),
+    m_frame(0),
+    m_inspecting(0),
+     m_show_textures(1),
+     m_show_bump(1),
+     m_show_shadows(1),
+     m_show_blur(1),
+    m_show_transparent(1)
 {
-  m_viewPos = vec3(-0.6,5,-10);
+  srand(time(NULL));
+  GRID_YOFFSET = SPHERE_RAD * glm::sqrt(3);
+  bubbleTypes.resize(NUM_BUBBLETYPES);
+  btRot.resize(NUM_BUBBLETYPES);
+  for (int i = 0; i < btRot.size(); i++) {
+    btRot[i].x = (1.0 - (double)(rand() % RAND_PRECIS) / RAND_PRECIS * 2) * 0.8;
+    btRot[i].y = (1.0 - (double)(rand() % RAND_PRECIS) / RAND_PRECIS * 2) * 0.8;
+    btRot[i].z = (1.0 - (double)(rand() % RAND_PRECIS) / RAND_PRECIS * 2) * 0.8;
+  }
+
+  bubbleGrid.resize(GRID_WIDTH);
+  for (int i = 0; i < GRID_WIDTH; i++) {
+    bubbleGrid[i].resize(gridHeight);
+    for (int j = 0; j < gridHeight; j++) {
+      bubbleGrid[i][j] = nullptr;
+    }
+  }
+
+  m_viewPos = vec3(0,0,-1);
 }
 
 //----------------------------------------------------------------------------------------
 // Destructor
 Project::~Project()
 {
-  delete[] m_textures;
   // TODO
   delete m_shader;
   delete m_depthMapShader;
+  delete m_rootNode;
 }
 
 //----------------------------------------------------------------------------------------
@@ -75,10 +140,12 @@ void Project::init()
   createShader(*m_shader, "VertexShader.vs", "FragmentShader.fs");
   createShader(*m_depthMapShader, "DepthMapVertexShader.vs", "DepthMapFragmentShader.fs");
   createShader(m_screenShader, "DrawScreen.vs", "DrawScreen.fs");
+  createShader(m_skyboxShader, "DrawSkybox.vs", "DrawSkybox.fs");
 
 	glGenVertexArrays(1, &m_vao_meshData);
 	glGenVertexArrays(1, &m_vao_screen);
 	glGenVertexArrays(1, &m_vao_depthData);
+	glGenVertexArrays(1, &m_vao_skybox);
 
   enableVertexShaderInputSlots();
 
@@ -90,7 +157,11 @@ void Project::init()
 	// class.
 	unique_ptr<MeshConsolidator> meshConsolidator (new MeshConsolidator{
 			getAssetFilePath("cube.obj"),
-			getAssetFilePath("sphere.obj")
+			getAssetFilePath("skybox.obj"),
+			getAssetFilePath("cylinder.obj"),
+			getAssetFilePath("cube-sameface.obj"),
+			getAssetFilePath("sphere.obj"),
+			getAssetFilePath("sphere-square-uv.obj")
 	});
 
 
@@ -111,9 +182,10 @@ void Project::init()
 
 	initPerspectiveMatrix();
 
-	initLightSources();
+	updateLightSources();
   initViewMatrix();
 
+  initSkybox();
 
   loadTextures();
   loadNoiseTexture();
@@ -121,6 +193,7 @@ void Project::init()
   initGameLogic();
 
   m_soundManager.init();
+  bgSoundId = m_soundManager.playBackground("background");
 }
 
 void Project::initWindowFBO(GLuint *fbo, GLuint *tex) {
@@ -144,6 +217,40 @@ void Project::initWindowFBO(GLuint *fbo, GLuint *tex) {
   GLenum DrawBuffers[1] = {GL_COLOR_ATTACHMENT0};
   glDrawBuffers(1, DrawBuffers); // "1" is the size of DrawBuffers
   CHECK_GL_ERRORS;
+
+}
+
+void Project::initSkybox() {
+  glGenTextures(1, &m_skybox);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, m_skybox);
+
+  vector<string> skyboxFaces;
+  skyboxFaces.resize(6);
+  string fname = "midnight-silence";
+  skyboxFaces[0] = fname+"_rt.tga";
+  skyboxFaces[1] = fname+"_lf.tga";
+  skyboxFaces[2] = fname+"_up.tga";
+  skyboxFaces[3] = fname+"_dn.tga";
+  skyboxFaces[4] = fname+"_bk.tga";
+  skyboxFaces[5] = fname+"_ft.tga";
+
+  int width, height, nrChannels;
+  unsigned char *data;  
+  for(GLuint i = 0; i < skyboxFaces.size(); i++) {
+
+      data = stbi_load(getAssetFilePath(skyboxFaces[i].c_str()).c_str(), &width, &height, &nrChannels, 0);
+      glTexImage2D(
+          GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 
+          0, GL_RGB, 512, 512, 0, GL_RGB, GL_UNSIGNED_BYTE, data
+      );
+      stbi_image_free(data);
+  }
+
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE); 
 
 }
 
@@ -201,8 +308,11 @@ void Project::loadNoiseTexture() {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-  PerlinNoise noise;
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, noise.NOISE_DIM, noise.NOISE_DIM, 0, GL_RGB, GL_UNSIGNED_BYTE, noise.getNoise().get());
+  PerlinNoise *noise = new PerlinNoise;
+  char *noiseTex = noise->getNoise();
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, noise->NOISE_DIM, noise->NOISE_DIM, 0, GL_RGB, GL_UNSIGNED_BYTE, noiseTex);
+  delete []noiseTex;
+  delete noise;
   CHECK_GL_ERRORS;
 }
 
@@ -222,7 +332,7 @@ void Project::loadTexture(const string &texture, char *defaultData) {
     DEBUGM(cerr << "loaded " << texPath << endl);
     if (data) {
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-      //glGenerateMipmap(GL_TEXTURE_2D);
+      glGenerateMipmap(GL_TEXTURE_2D);
     } else {
       std::cout << "Failed to load " << texPath << std::endl;
       assert(0);
@@ -230,10 +340,10 @@ void Project::loadTexture(const string &texture, char *defaultData) {
   }
 }
 
-void Project::loadTexturesFromList(set<string> &textures, map<string, GLuint> &nameMap, GLuint *texs, char *defaultData) {
+void Project::loadTexturesFromList(set<string> &textures, map<string, GLuint> &nameMap, std::vector<GLuint> texs, char *defaultData) {
   DEBUGM(cerr << "generating " << textures.size() << " textures" << endl);
-  texs = new GLuint[textures.size()];
-  glGenTextures(textures.size(), texs);
+  texs.resize(textures.size());
+  glGenTextures(textures.size(), texs.data());
   int texId = 0;
   for (set<string>::iterator it = textures.begin(); it != textures.end(); it++, texId++) {
     const string &texture = *it;
@@ -248,15 +358,17 @@ void Project::loadTexturesFromList(set<string> &textures, map<string, GLuint> &n
 }
 
 void Project::loadTextures() {
-  vector<GeometryNode *> nodes;
-  m_rootNode->getGeometryNodes(nodes);
+  vector<SceneNode *> nodes;
+  m_rootNode->getNodes(nodes);
 
   set<string> textures;
   set<string> bumpMaps;
-  for (vector<GeometryNode *>::iterator it = nodes.begin(); it != nodes.end(); it++) {
-    GeometryNode *node = *it;
-    textures.insert(node->texture);
-    bumpMaps.insert(node->bumpMap);
+  for (vector<SceneNode *>::iterator it = nodes.begin(); it != nodes.end(); it++) {
+    if ((*it)->m_nodeType == NodeType::GeometryNode) {
+      GeometryNode *node = dynamic_cast<GeometryNode *>(*it);
+      textures.insert(node->texture);
+      bumpMaps.insert(node->bumpMap);
+    }
   }
   
   unsigned char defaultTex[] = {255,255,255};
@@ -276,30 +388,130 @@ void Project::processLuaSceneFile(const std::string & filename) {
 
 	// This version of the code treats the main program argument
 	// as a straightforward pathname.
-	m_rootNode = std::shared_ptr<SceneNode>(import_lua(filename));
+	m_rootNode = import_lua(filename);
 	if (!m_rootNode) {
 		std::cerr << "Could not open " << filename << std::endl;
 	}
   
-  vector<GeometryNode *> nodes;
-  m_rootNode->getGeometryNodes(nodes);
+  vector<SceneNode *> nodes;
+  m_rootNode->getNodes(nodes);
   hookControls(nodes);
 }
 
-void Project::hookControls(vector<GeometryNode*> &nodes) {
-  for (vector<GeometryNode *>::iterator it = nodes.begin(); it != nodes.end(); it++) {
-    GeometryNode *node = *it;
-    if (node->m_name == "~player") {
-      m_playerNode = node;
-    } else if (node->meshId == "sphere") {
-      m_fixedBubbles.insert(node);
+
+vec3 getPosFromGrid(int i, int j) {
+  return vec3(- i * SPHERE_RAD * 2 - SPHERE_RAD * (j % 2) + XBOARDCORNER, - j * GRID_YOFFSET + boardTop - SPHERE_RAD, 0);
+}
+
+void Project::hookControls(vector<SceneNode *> &nodes) {
+  
+  for (vector<SceneNode *>::iterator it = nodes.begin(); it != nodes.end(); it++) {
+    SceneNode * node = *it;
+    GeometryNode *gnode = dynamic_cast<GeometryNode *>(*it);
+    if (gnode) {
+      if (gnode->m_name == "~topWall") {
+        m_topWall = gnode;
+      }  
+    } else if (node->m_name == "~cannon") {
+      m_cannonNode = node;
+    } else if (node->m_name == "~bubblesHolder") {
+      m_bubblesHolder = node;
+    }
+    for (int i = 0; i < NUM_BUBBLETYPES; i++) {
+      if (node->m_name == "~bubble" + std::to_string(i+1)) bubbleTypes[i] = node;
+    }
+  }
+
+  for (int i = 0; i < NUM_BUBBLETYPES; i++) {
+    if (bubbleTypes[i] == nullptr) {
+      cerr << i << endl;
+      assert(0);
     }
   }
 }
 
+void getNearestGrid(vec3 pos, int &i, int &j) {
+  float approxj = (pos.y - boardTop + SPHERE_RAD) / GRID_YOFFSET * -1;
+
+  j = glm::round(approxj);
+  float approxi = (pos.x - XBOARDCORNER + SPHERE_RAD * (j % 2)) / (SPHERE_RAD * 2) * -1;
+  DEBUGM(cerr << "approx j" << approxj << endl);
+  DEBUGM(cerr << "approx i" << approxi << endl);
+
+  i = glm::round(glm::clamp(approxi, 0.0f, GRID_WIDTH-1));
+}
+
+
 void Project::initGameLogic() {
-  m_playerNode->setPos(vec3(0,2,0));
-  m_playerNode->setMoveVector(vec3(0.1f,0.05f,0));
+  m_topWall->setPos(vec3(0,boardTop,0));
+
+  /*for (int i = 0; i < GRID_WIDTH;i++) {
+    for (int j = 0; j < gridHeight; j++) {
+      vec3 pos = getPosFromGrid(i, j);
+
+      GeometryNode *newBubble = new GeometryNode("sphere", "bubble");
+      newBubble->scale(vec3(SPHERE_RAD));
+      newBubble->setPos(pos);
+      m_bubblesHolder->add_child(newBubble);
+    }
+  }*/
+  resetBoard();
+  readyBubble();
+}
+
+void Project::bubbleOffGrid() {
+  m_soundManager.playSound("sad");
+  resetBoard();
+}
+
+void Project::lowerTop() {
+  gridHeight-=1;
+  boardTop -= GRID_YOFFSET;
+  m_topWall->setPos(vec3(0,boardTop,0));
+  for (int i = 0; i < GRID_WIDTH;i++) {
+    for (int j = 0; j < START_GRID_HEIGHT; j++) {
+      if (bubbleGrid[i][j]) {
+        bubbleGrid[i][j]->setPos(getPosFromGrid(i, j));
+        if (j >= gridHeight) bubbleOffGrid();
+      }
+    }
+  }
+}
+
+void Project::readyBubble() {
+  static size_t bt = 0;
+  BubbleNode*newBubble = new BubbleNode("bubble");
+  newBubble->collisionRadius= SPHERE_RAD;
+  if (cycleTypes)
+    bt = (bt + 1) % NUM_BUBBLETYPES;
+  else
+    bt = rand() % NUM_BUBBLETYPES;
+
+  newBubble->type = bt;
+  
+  newBubble->setPos(CANNON_POS);
+  newBubble->add_child(bubbleTypes[bt]);
+
+  m_newBubble = newBubble;
+  m_bubblesHolder->add_child(newBubble);
+}
+
+void Project::shootBubble() {
+  if (m_inspecting) return;
+  if (m_newBubble->moveVector == vec3(0)) {
+    m_newBubble->setMoveVector(glm::rotate(vec3(1,0,0), glm::radians(m_cannonAngle), vec3(0,0,1)) * BUBBLE_SPEED);
+    curTurnsUntilLower--;
+  }
+}
+
+void Project::rotateCannon(int dir) {
+  if (m_inspecting) return;
+  float amt = dir * ROT_SPEED;
+  float pCannonAngle = m_cannonAngle;
+    m_cannonAngle = glm::clamp(m_cannonAngle + amt, 0+ROT_MAX, 180-ROT_MAX);
+  if (pCannonAngle != m_cannonAngle) {
+    m_cannonNode->rotate('z', amt);
+  }
 }
 
 void Project::createShader(ShaderProgram &program, const string &vs, const string &fs) {
@@ -397,6 +609,62 @@ void Project::uploadVertexDataToVbos (
   }
 
   {
+  
+  static const float skyboxVertices[] = {
+    // positions          
+    -1.0f,  1.0f, -1.0f,
+    -1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f, -1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+
+    -1.0f, -1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f,
+    -1.0f, -1.0f,  1.0f,
+
+    -1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f, -1.0f,
+     1.0f,  1.0f,  1.0f,
+     1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f,  1.0f,
+    -1.0f,  1.0f, -1.0f,
+
+    -1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f, -1.0f,
+     1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f,  1.0f,
+     1.0f, -1.0f,  1.0f
+  };
+
+    glGenBuffers(1, &m_vbo_skybox);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_skybox);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(skyboxVertices), skyboxVertices, GL_STATIC_DRAW);
+    m_skyboxShader.enable(); // TODO: cleanup
+    GLuint location = m_skyboxShader.getUniformLocation("skybox");
+    glUniform1i(location, 0);
+    m_skyboxShader.disable();
+  }
+
+  {
     glGenBuffers(1, &m_vbo_vertexTangents);
 
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo_vertexTangents);
@@ -428,6 +696,18 @@ void Project::mapVboDataToVertexShaderInputLocations()
 
     CHECK_GL_ERRORS;
   }
+
+  {
+    glBindVertexArray(m_vao_skybox);
+    glBindBuffer(GL_ARRAY_BUFFER, m_vbo_skybox);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+    
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    CHECK_GL_ERRORS;
+  }
 }
 
 //----------------------------------------------------------------------------------------
@@ -444,16 +724,18 @@ void Project::initViewMatrix() {
 }
 
 //----------------------------------------------------------------------------------------
-void Project::initLightSources() {
-	// World-space position
-	m_light.position = vec3(-7,5,-5);
+void Project::updateLightSources() {
+  if (m_inspecting)
+    m_light.position = vec3(2,2,-10);
+  else
+    m_light.position = vec3(glm::sin((double)m_frame/MAX_FRAME * 2 *glm::pi<double>()) * 7, 2,-10);
 	m_light.rgbIntensity = vec3(0.8f); // White light
 
   // glm::ortho(-10.0f, 10.0f, -10.0f, 10.0f, 0.0f, 50.0f)
 	float aspect = ((float)m_windowWidth) / m_windowHeight;
   m_lightSpaceMatrix = glm::perspective<float>(glm::radians(80.0f), 1.0f, 1.0f, 100.0f) *
     glm::lookAt(m_light.position, 
-                glm::vec3( 0.0f, 0.0f,  0.0f), 
+                glm::vec3( 0.0f, 0.0f,  12.0f), 
                 glm::vec3( 0.0f, 1.0f,  0.0f));
 }
 
@@ -463,8 +745,35 @@ void Project::uploadCommonSceneUniforms() {
   m_depthMapShader->uploadCommonSceneUniforms(this);
 }
 
-//TODO temporary
-static int frame = 0;
+static int skyboxFrame = 0;
+static const int maxSkyboxFrame = 10000;
+
+void Project::renderSkybox() {
+  skyboxFrame = (1+ skyboxFrame) % maxSkyboxFrame;
+
+  mat4 skyboxModel =glm::rotate(glm::radians(-15.0f), vec3(1,0,0)) * glm::rotate((float)skyboxFrame/maxSkyboxFrame* 2 *glm::pi<float>(), vec3(0,1,0));
+  glDepthMask(GL_FALSE);
+  m_skyboxShader.enable();
+
+  GLint location = m_skyboxShader.getUniformLocation("model");
+  glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(skyboxModel));
+  CHECK_GL_ERRORS;
+
+  location = m_skyboxShader.getUniformLocation("view");
+  glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(m_view));
+  CHECK_GL_ERRORS;
+
+  location = m_skyboxShader.getUniformLocation("projection");
+  glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(m_perpsective));
+  CHECK_GL_ERRORS;
+
+  glBindVertexArray(m_vao_skybox);
+  glBindTexture(GL_TEXTURE_CUBE_MAP, m_skybox);
+  glDrawArrays(GL_TRIANGLES,0,36);
+  glDepthMask(GL_TRUE);
+
+  m_skyboxShader.disable();
+}
 
 //----------------------------------------------------------------------------------------
 /*
@@ -472,16 +781,24 @@ static int frame = 0;
  */
 void Project::appLogic()
 {
-	// Place per frame, application logic here ...
-  frame = (frame + 1)%100;
+  m_frame = (m_frame + 1)%MAX_FRAME;
+  updateLightSources();
 
-  m_rootNode->children.front()->rotate('y', frame / 100.0);
+  // TODO rotation of each bubble type
+  for (int i = 0; i < bubbleTypes.size(); i++) {
+    bubbleTypes[i]->rotate('x', btRot[i].x);
+    bubbleTypes[i]->rotate('y', btRot[i].y);
+    bubbleTypes[i]->rotate('z', btRot[i].z);
+  }
 
   tickGameLogic();
   tickBubbleMovement();
 }
 
-void Project::tickGameLogic() {}
+void Project::tickGameLogic() {
+  if (glfwGetKey(m_window, GLFW_KEY_LEFT) == GLFW_PRESS) rotateCannon(-1);
+  else if (glfwGetKey(m_window, GLFW_KEY_RIGHT) == GLFW_PRESS) rotateCannon(1);
+}
 
 vec2 intersection(vec2 l1p, vec2 l1v, vec2 l2p, vec2 l2v) {
   float x1,y1,x2,y2,x3,y3,x4,y4;
@@ -496,60 +813,236 @@ vec2 intersection(vec2 l1p, vec2 l1v, vec2 l2p, vec2 l2v) {
       );
 }
 
-void Project::checkBBoxCollisions() {
-  vec2 pp = vec2(m_playerNode->position);
-  vec2 mv = glm::vec2(m_playerNode->moveVector);
+bool Project::checkBBoxCollisions() {
+  vec2 pp = vec2(m_newBubble->position);
+  vec2 mv = glm::vec2(m_newBubble->moveVector);
   vec2 pdir = glm::normalize(mv);
   float bboxdir[4][2] = {{0,1}, {0, 1}, {1,0}, {1,0}};
-  float bpts[4][2] = {{4,0}, {-4, 0}, {0,4}, {0,-4}};
+  float bpts[4][2] = {{BOARD_SIDE,0}, {-BOARD_SIDE, 0}, {0,boardTop}, {0,BOARD_BOTTOM}};
+  float bn[4][2] = {{-1,0}, {1, 0}, {0,-1}, {0,1}};
 
+  bool hitTop = false;
   for (int i = 0; i < 4; i++) {
-    vec2 bvec(bboxdir[i][0], bboxdir[i][1]); // line defining the bbox
+    vec2 bvec(bboxdir[i][0], bboxdir[i][1]); 
     vec2 bpt(bpts[i][0], bpts[i][1]);
-    vec2 n = glm::normalize(-bpt);
+    vec2 n(bn[i][0], bn[i][1]);
     
     vec2 btopp = pp - bpt;
     vec2 proj = bvec * glm::dot(btopp, bvec) / glm::dot(bvec, bvec) + bpt;
     float angle = glm::angle(pdir, bvec);
-    if (glm::dot(btopp, n) < 0 || glm::distance(proj, pp) < m_playerNode->collisionRadius) {
+    if (glm::dot(btopp, n) < 0 || glm::distance(proj, pp) < m_newBubble->collisionRadius) {
       cerr << i << endl;
       vec2 iPoint = intersection(bpt, bvec, pp, pdir);
-      m_playerNode->position = vec3((-pdir) * m_playerNode->collisionRadius / glm::sin(angle) + iPoint, m_playerNode->position.z);
-      m_playerNode->setMoveVector(glm::vec3(mv - 2 * glm::dot(mv, n) * n,0));
+      m_newBubble->position = vec3((-pdir) * (m_newBubble->collisionRadius / glm::sin(angle) + EPSILON) + iPoint, m_newBubble->position.z);
+      m_newBubble->setMoveVector(glm::vec3(mv - 2 * glm::dot(mv, n) * n,0));
+      
+      hitTop = i == 2;
     }
   }
+
+  return hitTop;
 }
 
-void Project::checkBBlCollisions() {
-  vec2 pp = vec2(m_playerNode->position);
-  vec2 mv = glm::vec2(m_playerNode->moveVector);
+void Project::inspectReady() {
+  static const vec3 inspectPos = vec3(0,4,-10.6);
+  if (m_inspecting) {
+    m_newBubble->translate(-inspectPos);
+    m_inspecting = !m_inspecting;
+    return;
+  }
+
+  if (glm::dot(m_newBubble->moveVector, vec3(1,1,1)) != 0) return;
+
+  m_newBubble->translate(inspectPos);
+  m_inspecting = !m_inspecting;
+}
+
+bool Project::checkBBlCollisions() {
+  vec2 pp = vec2(m_newBubble->position);
+  vec2 mv = glm::vec2(m_newBubble->moveVector);
   vec2 pdir = glm::normalize(mv);
 
-  for (std::set<GeometryNode *>::iterator it = m_fixedBubbles.begin(); it != m_fixedBubbles.end(); it++) {
-    GeometryNode *bbl = *it;
+  bool hit = false;
+  for (std::set<BubbleNode *>::iterator it = m_fixedBubbles.begin(); it != m_fixedBubbles.end(); it++) {
+    BubbleNode *bbl = *it;
     vec2 bblpos(bbl->position);
     vec2 ptobbl(bblpos - pp);
     vec2 proj = pp + pdir * glm::dot(ptobbl, pdir) / glm::dot(pdir, pdir);
 
-    float mindist = m_playerNode->collisionRadius + bbl->collisionRadius;
+    float mindist = m_newBubble->collisionRadius + bbl->collisionRadius;
     if (glm::distance(bblpos, pp) < mindist) {
-      cerr << glm::distance(bblpos, pp) << " " << m_playerNode->collisionRadius << " " << bbl->collisionRadius << endl;
+      DEBUGM(cerr << glm::distance(bblpos, pp) << " " << m_newBubble->collisionRadius << " " << bbl->collisionRadius << endl);
 
       float projd = glm::distance(proj, bblpos);
-      float along = glm::sqrt(mindist * mindist - projd * projd);
+      float along = glm::sqrt(mindist * mindist - projd * projd) + EPSILON;
       float alongdir = glm::dot(mv, ptobbl) > 0 ? -1:1;
-      m_playerNode->position = vec3(proj + alongdir * pdir * along, m_playerNode->position.z);
-      m_playerNode->setMoveVector(vec3(0));
+      m_newBubble->position = vec3(proj + alongdir * pdir * along, m_newBubble->position.z);
+      DEBUGM(cerr << "newPos" << m_newBubble->position << endl);
+      m_newBubble->setMoveVector(vec3(0));
+      hit = true;
     }
   }
+  return hit;
+}
+
+void Project::removeBubble(int i, int j) {
+  BubbleNode *bubble = bubbleGrid[i][j];
+  m_fixedBubbles.erase(bubble);
+  m_bubblesHolder->remove_child(bubble);
+  bubble->children.clear();
+  delete bubble;
+  bubbleGrid[i][j] = nullptr;
+}
+
+bool Project::checkForGroups(int si, int sj, size_t checkType) {
+  set<pair<int, int>> frontier;
+  set<pair<int,int>> seen;
+  frontier.insert(make_pair(si, sj));
+  seen.insert(make_pair(si,sj));
+
+  while (!frontier.empty()) {
+    auto it = frontier.begin();
+    auto p = *it;
+    DEBUGM(cerr << "current " << p.first << " " << p.second << endl);
+    frontier.erase(it);
+    const int around[6][2] = {{-1,0}, {1,0}, {0,1}, {0, -1}, 
+      {(p.second % 2 == 0 ? -1 : 1),1}, {(p.second % 2 == 0 ? -1 : 1), -1}};
+    for (int c = 0; c < 6; c++) {
+      int ni = around[c][0] + p.first;
+
+      int nj = around[c][1] + p.second;
+
+      if (ni < 0 || ni >= GRID_WIDTH || nj < 0 || nj >= gridHeight) continue;
+      if (bubbleGrid[ni][nj] && bubbleGrid[ni][nj]->type == checkType) {
+        auto nij = make_pair(ni, nj);
+        if (seen.count(nij) != 0) continue;
+
+        seen.insert(nij);
+        frontier.insert(nij);
+      }
+    }
+  }
+  DEBUGM(cerr << "group size" << seen.size() << endl);
+
+  if (seen.size() >= MIN_GROUPSIZE) {
+    m_soundManager.playSound("blop");
+    for (auto it = seen.begin(); it != seen.end(); it++) {
+      auto e = *it;
+      removeBubble(e.first, e.second);
+    }
+    return true;
+  }
+  return false;
+}
+
+bool Project::checkForDisconnected() {
+  set<pair<int, int>> frontier;
+  set<pair<int,int>> seen;
+  
+  bool boardClear = true;
+  for (int i = 0; i < GRID_WIDTH; i++) {
+    if (bubbleGrid[i][0]) {
+      frontier.insert(make_pair(i, 0));
+      seen.insert(make_pair(i, 0));
+      boardClear = false;
+    }
+  }
+  if (boardClear) return true;
+
+  while (!frontier.empty()) {
+    auto it = frontier.begin();
+    auto p = *it;
+    DEBUGM(cerr << "current " << p.first << " " << p.second << endl);
+    frontier.erase(it);
+    const int around[6][2] = {{-1,0}, {1,0}, {0,1}, {0, -1}, 
+      {(p.second % 2 == 0 ? -1 : 1),1}, {(p.second % 2 == 0 ? -1 : 1), -1}};
+    for (int c = 0; c < 6; c++) {
+      int ni = around[c][0] + p.first;
+
+      int nj = around[c][1] + p.second;
+
+      if (ni < 0 || ni >= GRID_WIDTH || nj < 0 || nj >= gridHeight) continue;
+      if (bubbleGrid[ni][nj]) {
+        auto nij = make_pair(ni, nj);
+        if (seen.count(nij) != 0) continue;
+        seen.insert(nij);
+        frontier.insert(nij);
+      }
+    }
+  }
+
+  for (int i = 0; i < GRID_WIDTH; i++) {
+    for (int j = 0; j < gridHeight; j++) {
+      if (bubbleGrid[i][j] && seen.count(make_pair(i,j)) == 0) {
+        removeBubble(i,j);
+      }
+    }
+  }
+
+  return false;
+}
+
+void Project::createBubbleAt(int i, int j, size_t type) {
+  BubbleNode*newBubble = new BubbleNode("bubble");
+  newBubble->collisionRadius= SPHERE_RAD;
+  newBubble->type = type;
+  
+  newBubble->setPos(getPosFromGrid(i,j));
+  m_fixedBubbles.insert(newBubble);
+  bubbleGrid[i][j] = newBubble;
+
+  newBubble->add_child(bubbleTypes[type]);
+  m_bubblesHolder->add_child(newBubble);
 }
 
 void Project::tickBubbleMovement() { // ASSUME only 2d collisions
-  m_playerNode->move();
+  m_newBubble->move();
   
-  checkBBlCollisions();
-  checkBBoxCollisions();
+  if (checkBBlCollisions() || checkBBoxCollisions()) {
+    m_newBubble->setMoveVector(vec3(0));
+    int i, j;
+    getNearestGrid(m_newBubble->position, i, j);
+    DEBUGM(cerr << "round " << i << " " << j << endl);
+
+    if (j >= gridHeight) {
+      m_bubblesHolder->remove_child(m_newBubble);
+      m_newBubble->children.clear();
+      delete m_newBubble;
+      m_newBubble = nullptr;
+      bubbleOffGrid();
+      readyBubble();
+    } else {
+      /*GeometryNode *newBubble = new GeometryNode("sphere", "bubble");
+      newBubble->scale(vec3(0.5));
+      newBubble->setPos(m_newBubble->position);
+      newBubble->material.kd = vec3(1);
+      m_bubblesHolder->add_child(newBubble);
+  */
+      BubbleNode *tempbbl = m_newBubble;
+      tempbbl->position = getPosFromGrid(i, j);
+
+      m_fixedBubbles.insert(tempbbl);
+      readyBubble();
+
+      bubbleGrid[i][j] = tempbbl;
+
+      if (checkForGroups(i, j, tempbbl->type) && checkForDisconnected()) {
+        //m_soundManager.playSound("bazinga");
+        m_soundManager.playSound("applause");
+        resetBoard();
+      }
+
+      if (curTurnsUntilLower == 0) {
+        curTurnsUntilLower = TURNS_UNTIL_LOWER;
+        lowerTop();
+      }
+
+
+    }
+
+  }
 }
+
 
 //----------------------------------------------------------------------------------------
 /*
@@ -563,7 +1056,7 @@ void Project::guiLogic()
 
 	static bool firstRun(true);
 	if (firstRun) {
-		ImGui::SetNextWindowPos(ImVec2(50, 50));
+		ImGui::SetNextWindowPos(ImVec2(30, 50));
 		firstRun = false;
 	}
 
@@ -583,7 +1076,20 @@ void Project::guiLogic()
 			glfwSetWindowShouldClose(m_window, GL_TRUE);
 		}
 
-		ImGui::Text( "Framerate: %.1f FPS", ImGui::GetIO().Framerate );
+		ImGui::Text( "Framerate: %.1f FPS\n", ImGui::GetIO().Framerate );
+
+		ImGui::Text( "Cannon angle: %.1f FPS", m_cannonAngle);
+
+    ImGui::Text( "Inspecting (I): %d", m_inspecting);
+    ImGui::Text( "Cycle Types (C): %d", cycleTypes);
+    ImGui::Text( "Turns Until Lower (L): %d\n", (int)curTurnsUntilLower);
+
+    ImGui::Text( "Textures (1): %d", m_show_textures);
+    ImGui::Text( "Bump (2): %d", m_show_bump);
+    ImGui::Text( "Shadows (3): %d", m_show_shadows);
+    ImGui::Text( "Blur (4): %d", m_show_blur);
+    ImGui::Text( "Transparent (5): %d", m_show_transparent);
+    ImGui::Text("Other controls: \n(A) Toggle all\n(S) Play sound\n(B) Reset BG music\n(R) Reset");
 
 	ImGui::End();
 }
@@ -620,17 +1126,19 @@ void Project::draw() {
   glViewport(0, 0, m_windowWidth, m_windowHeight);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+  renderSkybox();
+
   glActiveTexture(GL_TEXTURE2);
   glBindTexture(GL_TEXTURE_2D, m_depthMap);
 
   glEnable( GL_DEPTH_TEST );
-  glEnable(GL_CULL_FACE);
+  //glEnable(GL_CULL_FACE);
   renderSceneGraph(*m_shader, *m_rootNode);
 
   
   renderTransparentNodes(*m_shader, *m_rootNode);
   
-  glDisable(GL_CULL_FACE);
+  //glDisable(GL_CULL_FACE);
   glDisable(GL_DEPTH_TEST);
   
 
@@ -654,6 +1162,11 @@ void Project::draw() {
   glBindVertexArray(m_vao_screen);
 
   m_screenShader.enable();
+
+  GLuint location = m_screenShader.getUniformLocation("doBlur");
+  glUniform1i(location, m_show_blur);
+  CHECK_GL_ERRORS;
+
   glDrawArrays(GL_TRIANGLES, 0, 6);
   m_screenShader.disable();
 
@@ -675,6 +1188,7 @@ void Project::draw() {
 }
 
 void Project::collectTransparentNodesRecursive(const SceneNode &root, const glm::mat4 &parentTransform, std::vector<std::pair<const GeometryNode *, glm::mat4> > &transparentNodes) {
+  if (root.m_name == HIDDEN) return;
   glm::mat4 myTrans = parentTransform * root.get_transform();
   for (const SceneNode * node : root.children) {
     collectTransparentNodesRecursive(*node, myTrans, transparentNodes);
@@ -697,6 +1211,7 @@ void Project::renderTransparentNodes(const SceneGraphShader &shader, const Scene
   glBindVertexArray(m_shader->m_vao);
   vector<pair<const GeometryNode *,mat4>> transparentNodes;
   collectTransparentNodesRecursive(*m_rootNode, mat4(), transparentNodes);
+  /*
   vector<float> centroidDistToCamera(transparentNodes.size());
   for (int i = 0; i < centroidDistToCamera.size(); i++) {
     auto p = transparentNodes[i];
@@ -710,9 +1225,9 @@ void Project::renderTransparentNodes(const SceneGraphShader &shader, const Scene
   sort(tNodeId.begin(), tNodeId.end(), [centroidDistToCamera](int i, int j) {
       return centroidDistToCamera[i] > centroidDistToCamera[j];
   });
-
-  for (int i = 0; i < tNodeId.size(); i++) {
-    auto p = transparentNodes[tNodeId[i]];
+*/
+  for (int i = 0; i < transparentNodes.size(); i++) {
+    auto p = transparentNodes[i];
     
     m_shader->updateShaderUniforms(this, p.first, p.second, m_view);
     CHECK_GL_ERRORS;
@@ -746,6 +1261,7 @@ void Project::renderSceneGraph(const SceneGraphShader &shader, const SceneNode &
 
 // only renders non-transparent objects
 void Project::renderSceneGraphRecursive(const SceneGraphShader &shader, const mat4 &parentTransform, const SceneNode &root, bool renderTransparent){
+  if (root.m_name == HIDDEN) return;
   glm::mat4 myTrans = parentTransform * root.get_transform();
   for (const SceneNode * node : root.children) {
     renderSceneGraphRecursive(shader, myTrans, *node, renderTransparent);
@@ -850,7 +1366,40 @@ bool Project::windowResizeEvent (
 	return eventHandled;
 }
 
-static ALuint sdfs = 0;
+void Project::resetBoard() {
+  if (m_inspecting) inspectReady();
+
+  curTurnsUntilLower =  TURNS_UNTIL_LOWER;
+  m_cannonNode->rotate('z', 90 - m_cannonAngle);
+  m_cannonAngle = 90.0f;
+
+  boardTop = STARTTOP;
+  m_topWall->setPos(vec3(0,boardTop,0));
+
+  gridHeight = START_GRID_HEIGHT;
+  for (int i = 0; i < GRID_WIDTH; i++) {
+    for (int j = 0; j < gridHeight; j++) {
+      if (bubbleGrid[i][j]) {
+        removeBubble(i,j);
+      }
+    }
+  }
+
+  {
+    ifstream f(getAssetFilePath(LEVELFILE.c_str()));
+    for (int j = 0; j < gridHeight; j++) {
+      for (int i = 0; i < GRID_WIDTH; i++) {
+        int type;
+        f >> type;
+        if (f.eof()) goto endread;
+        if (type != -1) createBubbleAt(i,j,type);
+      }
+    }
+endread:
+    cerr << "loaded from " << LEVELFILE << endl;
+  }
+}
+
 //----------------------------------------------------------------------------------------
 /*
  * Event handler.  Handles key input events.
@@ -867,19 +1416,75 @@ bool Project::keyInputEvent (
 			show_gui = !show_gui;
 			eventHandled = true;
 		}
+
     if (key == GLFW_KEY_Q) {
+      m_soundManager.stopBGSound(bgSoundId);
 			glfwSetWindowShouldClose(m_window, GL_TRUE);
       eventHandled = true;
     }
-    if (key == GLFW_KEY_F) {
-      m_soundManager.playSound("bazinga");
+
+    if (key == GLFW_KEY_1) {
+      m_show_textures = !m_show_textures;
+    }
+    
+    else if (key == GLFW_KEY_2) {
+      m_show_bump = !m_show_bump;
     }
 
-    if (key == GLFW_KEY_G) {
-      m_soundManager.stopSound(sdfs);
+    else if (key == GLFW_KEY_3) {
+      m_show_shadows = !m_show_shadows;
     }
-    if (key == GLFW_KEY_D) {
-      sdfs = m_soundManager.playBackground("bg1");
+
+    else if (key == GLFW_KEY_4) {
+      m_show_blur = !m_show_blur;
+    }
+
+    else if (key == GLFW_KEY_5) {
+      m_show_transparent = !m_show_transparent;
+    }
+
+    else if (key == GLFW_KEY_A) {
+      m_show_blur = !m_show_blur;
+      m_show_shadows = !m_show_shadows;
+      m_show_bump = !m_show_bump;
+      m_show_textures = !m_show_textures;
+      m_show_transparent = !m_show_transparent;
+      cycleTypes = !cycleTypes;
+    }
+    
+    else if (key == GLFW_KEY_I) {
+      inspectReady();
+    } 
+    
+    else if (key == GLFW_KEY_S) {
+      m_soundManager.playSound("bazinga");
+    } else if (key == GLFW_KEY_B) {
+      m_soundManager.stopBGSound(bgSoundId);
+      bgSoundId = m_soundManager.playBackground("background");
+    }
+
+    else if (key == GLFW_KEY_L && glm::dot(m_newBubble->moveVector, vec3(1,1,1))==0) {
+      lowerTop();
+    } else if (key == GLFW_KEY_C) {
+      cycleTypes = !cycleTypes;
+    }
+
+    else if (key == GLFW_KEY_R && glm::dot(m_newBubble->moveVector, vec3(1,1,1))==0) {
+
+      m_show_blur = 1;
+      m_show_shadows = 1;
+      m_show_bump = 1;
+      m_show_textures = 1;
+      m_show_transparent = 1;
+      cycleTypes = 0;
+      resetBoard();
+      m_soundManager.stopBGSound(bgSoundId);
+      m_soundManager.playBackground("background");
+
+    }
+
+    if (key == GLFW_KEY_SPACE) {
+      shootBubble();
     }
 
 	}

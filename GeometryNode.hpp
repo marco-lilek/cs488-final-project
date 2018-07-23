@@ -17,14 +17,12 @@ public:
   std::string texture;
   std::string bumpMap;
 
-  void move();
-  void setMoveVector(const glm::vec3 &mv);
-  void setPos(glm::vec3 pos);
+};
 
-  virtual const glm::mat4 get_transform() const;
-  virtual void scale(const glm::vec3 & amount);
 
-  glm::vec3 position;
-  glm::vec3 moveVector;
-  float collisionRadius;
+struct BubbleNode : public SceneNode {
+	BubbleNode(
+		const std::string & name
+	) : SceneNode(name) {}
+  size_t type;
 };

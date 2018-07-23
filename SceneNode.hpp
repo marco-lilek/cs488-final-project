@@ -56,7 +56,14 @@ public:
 	std::string m_name;
 	unsigned int m_nodeId;
 
-void getGeometryNodes(std::vector<GeometryNode *> &nodes);
+void getNodes(std::vector<SceneNode *> &nodes);
+
+  void move();
+  void setMoveVector(const glm::vec3 &mv);
+  void setPos(glm::vec3 pos);
+  glm::vec3 position;
+  glm::vec3 moveVector;
+  float collisionRadius;
 
 private:
 	// The number of SceneNode instances.

@@ -3,7 +3,9 @@
 #include "Project.hpp"
 #include <glm/gtc/type_ptr.hpp>
 #include "GeometryNode.hpp"
+#include <iostream>
 
+using namespace std;
 using namespace glm;
 
 SceneGraphShader::SceneGraphShader() {
@@ -121,6 +123,9 @@ void SceneShader::uploadCommonSceneUniforms(Project *project) {
   GLint location = getUniformLocation("Perspective");
   glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(project->m_perpsective));
   CHECK_GL_ERRORS;
+  
+  location = getUniformLocation("showShadows");
+  glUniform1i(location, project->m_show_shadows);
 
   {
     location = getUniformLocation("viewPos");
@@ -167,11 +172,6 @@ void SceneShader::updateShaderUniforms(Project *project,
   glUniformMatrix4fv(location, 1, GL_FALSE, value_ptr(nodeTrans));
   CHECK_GL_ERRORS;
 
-  //-- Set NormMatrix:
-  location = getUniformLocation("NormalMatrix");
-  mat3 normalMatrix = glm::transpose(glm::inverse(mat3(nodeTrans)));
-  glUniformMatrix3fv(location, 1, GL_FALSE, value_ptr(normalMatrix));
-  CHECK_GL_ERRORS;
 
   //-- Set Material values:
   location = getUniformLocation("material.kd");
@@ -186,18 +186,28 @@ void SceneShader::updateShaderUniforms(Project *project,
   glUniform1f(location, node->material.shininess);
   CHECK_GL_ERRORS;
   location = getUniformLocation("material.transparency");
-  glUniform1f(location, node->material.transparency);
+  glUniform1f(location, (!project->m_show_transparent) ? 1.0 : node->material.transparency);
   CHECK_GL_ERRORS;
+  location = getUniformLocation("showTextures");
+  glUniform1i(location, project->m_show_textures);
+
   disable();
 
   glActiveTexture(GL_TEXTURE0);
-  if (node->texture == "~perlin") {
+  if (!project->m_show_textures) {
+    glBindTexture(GL_TEXTURE_2D, 0);
+  } else if (node->texture == "~perlin") {
     glBindTexture(GL_TEXTURE_2D, project->m_noiseTexture);
   } else {
     glBindTexture(GL_TEXTURE_2D, project->m_textureNameIdMap[node->texture]);
   }
+
   glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_2D, project->m_bumpNameIdMap[node->bumpMap]);
+  if (!project->m_show_bump) {
+    glBindTexture(GL_TEXTURE_2D, 0);
+  } else {
+    glBindTexture(GL_TEXTURE_2D, project->m_bumpNameIdMap[node->bumpMap]);
+  }
 }
 
 void SceneShader::setTextureMaps() {

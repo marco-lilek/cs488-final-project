@@ -2,7 +2,7 @@
 
 #include "cs488-framework/MathUtils.hpp"
 
-#include "GeometryNode.hpp"
+#include "SceneNode.hpp"
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -23,7 +23,7 @@ SceneNode::SceneNode(const std::string& name)
 	m_nodeType(NodeType::SceneNode),
 	trans(mat4()),
 	isSelected(false),
-	m_nodeId(nodeInstanceCount++)
+	m_nodeId(nodeInstanceCount++),position(0), moveVector(0), collisionRadius(1)
 {
 
 }
@@ -41,10 +41,18 @@ SceneNode::SceneNode(const SceneNode & other)
 	}
 }
 
+#include <set>
+
+// lol
+set<SceneNode*> deleted;
 //---------------------------------------------------------------------------------------
 SceneNode::~SceneNode() {
 	for(SceneNode * child : children) {
-		delete child;
+		if (deleted.count(child) == 0) {
+      deleted.insert(child);
+      delete child;
+    }
+    
 	}
 }
 
@@ -54,10 +62,11 @@ void SceneNode::set_transform(const glm::mat4& m) {
 	invtrans = m;
 }
 
-//---------------------------------------------------------------------------------------
+
 const glm::mat4 SceneNode::get_transform() const {
-	return trans;
+  return glm::translate(mat4(), position) * trans;
 }
+
 
 //---------------------------------------------------------------------------------------
 const glm::mat4& SceneNode::get_inverse() const {
@@ -95,10 +104,6 @@ void SceneNode::rotate(char axis, float angle) {
 	trans = rot_matrix * trans;
 }
 
-//---------------------------------------------------------------------------------------
-void SceneNode::scale(const glm::vec3 & amount) {
-	trans = glm::scale(amount) * trans;
-}
 
 //---------------------------------------------------------------------------------------
 void SceneNode::translate(const glm::vec3& amount) {
@@ -111,13 +116,11 @@ int SceneNode::totalSceneNodes() const {
 	return nodeInstanceCount;
 }
 
-void SceneNode::getGeometryNodes(std::vector<GeometryNode *> &nodes) {
-  if (m_nodeType == NodeType::GeometryNode) {
-    nodes.push_back(dynamic_cast<GeometryNode *>(this));
-  }
+void SceneNode::getNodes(std::vector<SceneNode *> &nodes) {
+  nodes.push_back(this);
   
   for (auto child: children) {
-    child->getGeometryNodes(nodes);
+    child->getNodes(nodes);
   }
 }
 
@@ -130,7 +133,7 @@ std::ostream & operator << (std::ostream & os, const SceneNode & node) {
 			os << "SceneNode";
 			break;
 		case NodeType::GeometryNode:
-			os << "GeometryNode";
+			os << "SceneNode";
 			break;
 		case NodeType::JointNode:
 			os << "JointNode";
@@ -143,4 +146,24 @@ std::ostream & operator << (std::ostream & os, const SceneNode & node) {
 	os << "]";
 
 	return os;
+}
+
+void SceneNode::setMoveVector(const glm::vec3 &mv) {
+  moveVector = mv;
+}
+
+void SceneNode::move() {
+  position += moveVector;
+}
+
+void SceneNode::setPos(glm::vec3 pos) {
+  position = pos;
+}
+
+void SceneNode::scale(const glm::vec3 & amount) { // NOTE assumes we do scales first
+	trans = glm::scale(amount) * trans;
+  if (amount.x == amount.y && amount.x == amount.z)
+    collisionRadius *= amount.x;
+  else
+    collisionRadius = 0;
 }

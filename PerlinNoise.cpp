@@ -44,7 +44,7 @@ void PerlinNoise::generateNoise() {
   }
 }
 
-shared_ptr<char> PerlinNoise::getNoise() {
+char* PerlinNoise::getNoise() {
   double xPeriod = 5.0;
   double yPeriod = 10.0;
   double turbPower = 5.0;
@@ -63,5 +63,5 @@ shared_ptr<char> PerlinNoise::getNoise() {
       toRet[3* (x * NOISE_DIM + y)+2] = cval;
     }
   }
-  return shared_ptr<char>(toRet);
+  return toRet;
 }

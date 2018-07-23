@@ -52,7 +52,7 @@ protected:
 
 	void uploadVertexDataToVbos(const MeshConsolidator & meshConsolidator);
 	void initViewMatrix();
-	void initLightSources();
+	void updateLightSources();
 
 	void initPerspectiveMatrix();
 	void uploadCommonSceneUniforms();
@@ -65,13 +65,15 @@ protected:
 
   void loadTextures();
   void loadTexture(const std::string &texture, char *defaultData);
-  void loadTexturesFromList(std::set<std::string> &textures, std::map<std::string, GLuint> &nameMap, GLuint *texs, char *defaultData);
+  void loadTexturesFromList(std::set<std::string> &textures, std::map<std::string, GLuint> &nameMap, std::vector<GLuint>, char *defaultData);
 
 public:
   
   std::map<std::string, GLuint> m_bumpNameIdMap;
-  GLuint *m_bumps;
+  std::vector<GLuint> m_bumps;
 
+  static const int MAX_FRAME = 360;
+  int m_frame;
 	glm::mat4 m_perpsective;
 	glm::mat4 m_view;
   glm::vec3 m_viewPos;
@@ -89,7 +91,7 @@ public:
 	SceneGraphShader *m_shader;
 
   std::map<std::string, GLuint> m_textureNameIdMap;
-  GLuint *m_textures;
+  std::vector<GLuint> m_textures;
 
   GLuint m_fbo_depthMap;
   GLuint m_vao_depthData;
@@ -128,21 +130,56 @@ public:
 
 	std::string m_luaSceneFile;
 
-	std::shared_ptr<SceneNode> m_rootNode;
+	SceneNode *m_rootNode;
   void collectTransparentNodesRecursive(const SceneNode &root, const glm::mat4 &parentTransform, std::vector<std::pair<const GeometryNode *, glm::mat4> > &transparentNodes);
 
-  void hookControls(std::vector<GeometryNode*> &nodes);
-  GeometryNode * m_playerNode;
+  void hookControls(std::vector<SceneNode *> &nodes);
+  
+  GeometryNode * m_topWall;
+  BubbleNode*  m_newBubble;
+
+  float m_cannonAngle;
+  SceneNode * m_cannonNode;
+
+  SceneNode * m_bubblesHolder;
+  void rotateCannon(int dir);
 
   void tickGameLogic();
   void tickBubbleMovement();
   void initGameLogic();
 
-  void checkBBoxCollisions();
-  void checkBBlCollisions();
+  void createBubbleAt(int i, int j, size_t type);
+  void bubbleOffGrid();
+  void lowerTop();
+  bool checkBBoxCollisions();
+  bool checkBBlCollisions();
 
-  std::set<GeometryNode *> m_fixedBubbles;
+  void readyBubble();
+  bool checkForGroups(int si, int sj, size_t checkType);
+  bool checkForDisconnected();
+  void shootBubble();
+  void removeBubble(int i, int j);
+
+  std::set<BubbleNode *> m_fixedBubbles;
 
   SoundManager m_soundManager;
+  
+  void inspectReady();
+  bool m_inspecting;
+  ShaderProgram m_skyboxShader;
+  GLuint m_vao_skybox;
+  GLuint m_vbo_skybox;
+  GLuint m_skybox;
+  void initSkybox();
+  void renderSkybox();
+
+  bool m_show_textures;
+  bool m_show_bump;
+  bool m_show_shadows;
+  bool m_show_blur;
+  bool m_show_transparent;
+
+  void resetBoard();
+
   friend class SceneGraphShader;
 };
