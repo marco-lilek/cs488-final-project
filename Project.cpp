@@ -93,7 +93,8 @@ Project::Project(const std::string & luaSceneFile)
      m_show_bump(1),
      m_show_shadows(1),
      m_show_blur(1),
-    m_show_transparent(1)
+    m_show_transparent(1),
+   m_noiseTexture(0)
 {
   srand(time(NULL));
   GRID_YOFFSET = SPHERE_RAD * glm::sqrt(3);
@@ -299,7 +300,8 @@ void Project::initDepthMapFBO() {
 }
 
 void Project::loadNoiseTexture() {
-  glGenTextures(1, &m_noiseTexture);
+  if (m_noiseTexture == 0)
+    glGenTextures(1, &m_noiseTexture);
   
   glBindTexture(GL_TEXTURE_2D, m_noiseTexture);
 
@@ -1085,11 +1087,12 @@ void Project::guiLogic()
     ImGui::Text( "Turns Until Lower (L): %d\n", (int)curTurnsUntilLower);
 
     ImGui::Text( "Textures (1): %d", m_show_textures);
-    ImGui::Text( "Bump (2): %d", m_show_bump);
+    ImGui::Text( "Bumps (2): %d", m_show_bump);
     ImGui::Text( "Shadows (3): %d", m_show_shadows);
     ImGui::Text( "Blur (4): %d", m_show_blur);
-    ImGui::Text( "Transparent (5): %d", m_show_transparent);
-    ImGui::Text("Other controls: \n(A) Toggle all\n(S) Play sound\n(B) Reset BG music\n(R) Reset");
+    ImGui::Text( "Transparency (5): %d", m_show_transparent);
+    ImGui::Text("Other controls: \n(A) Toggle all\n(S) Play sound"
+         "\n(B) Reset BG music\n(R) Reset\n(P) Regen Marble Texture");
 
 	ImGui::End();
 }
@@ -1461,6 +1464,8 @@ bool Project::keyInputEvent (
     } else if (key == GLFW_KEY_B) {
       m_soundManager.stopBGSound(bgSoundId);
       bgSoundId = m_soundManager.playBackground("background");
+    } else if (key == GLFW_KEY_P) {
+      loadNoiseTexture();
     }
 
     else if (key == GLFW_KEY_L && glm::dot(m_newBubble->moveVector, vec3(1,1,1))==0) {

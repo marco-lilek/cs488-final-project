@@ -1,6 +1,7 @@
 #include "PerlinNoise.hpp"
 
 #include <glm/glm.hpp>
+#include <cstdlib>
 
 using namespace std;
 PerlinNoise::PerlinNoise() {
