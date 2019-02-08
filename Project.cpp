@@ -52,7 +52,7 @@ static float gridHeight = START_GRID_HEIGHT;
 static float GRID_YOFFSET;
 static const float XBOARDCORNER = 4.25;
 
-static const size_t NUM_BUBBLETYPES = 5;
+static const size_t NUM_BUBBLETYPES = 6;
 static const size_t MIN_GROUPSIZE = 3;
 
 static vector<vector<BubbleNode *>> bubbleGrid;
@@ -1213,7 +1213,9 @@ void Project::renderTransparentNodes(const SceneGraphShader &shader, const Scene
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glBindVertexArray(m_shader->m_vao);
   vector<pair<const GeometryNode *,mat4>> transparentNodes;
+  // will draw the children before the parents, guaranteed that theyre further away
   collectTransparentNodesRecursive(*m_rootNode, mat4(), transparentNodes);
+
   /*
   vector<float> centroidDistToCamera(transparentNodes.size());
   for (int i = 0; i < centroidDistToCamera.size(); i++) {
@@ -1229,6 +1231,7 @@ void Project::renderTransparentNodes(const SceneGraphShader &shader, const Scene
       return centroidDistToCamera[i] > centroidDistToCamera[j];
   });
 */
+
   for (int i = 0; i < transparentNodes.size(); i++) {
     auto p = transparentNodes[i];
     

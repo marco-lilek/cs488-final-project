@@ -135,20 +135,21 @@ bubble5:rotate('x',90)
 bubble5:set_material(gr.material({0.4,0.2,0.8}, {0.1, 0.5, 0.5}, 10, 1))
 bubble5:set_texture('', 'crystal-normal-sphere.jpg');
 
---[[bubble6 = gr.node('~bubble6')
-hidden:add_child(bubble6)
 
-bubble6ext = gr.mesh('sphere-square-uv', 'bubble6ext')
-bubble6:add_child(bubble6ext)
-bubble6ext:scale(br,br,br)
-bubble6ext:rotate('x',90)
-bubble6ext:set_material(gr.material({0.8,0,0}, {0.8,0,0}, 5, 0.4))
-bubble6ext:set_texture('', '');
+--bubble6 = gr.node('~bubble6')
+--hidden:add_child(bubble6)
 
-bubble6Inside = gr.mesh('sphere-square-uv', 'bubble6Inside')
-bubble6:add_child(bubble6Inside)
-bubble6Inside:scale(br/2,br/2,br/2)
-bubble6Inside:set_material(gr.material({0,1,0}, {0, 0.3, 0}, 20, 0.4))
-bubble6Inside:set_texture('', '');]]
+--bubble6ext = gr.mesh('sphere-square-uv', 'bubble6ext')
+--bubble6:add_child(bubble6ext)
+--bubble6ext:scale(br,br,br)
+--bubble6ext:rotate('x',90)
+--bubble6ext:set_material(gr.material({0.8,0,0}, {0.8,0,0}, 5, 0.4))
+--bubble6ext:set_texture('', '');
+
+--bubble6Inside = gr.mesh('sphere-square-uv', 'bubble6Inside')
+--bubble6:add_child(bubble6Inside)
+--bubble6Inside:scale(br/2,br/2,br/2)
+--bubble6Inside:set_material(gr.material({0,1,0}, {0, 0.3, 0}, 20, 0.4))
+--bubble6Inside:set_texture('', '');
 
 return rootNode
